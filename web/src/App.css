@@ -1,0 +1,435 @@
+/* ═══════════════════════════════════════════════════════════════
+   Demucs Spectrogram Viewer — Styles
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Animated border property ─────────────────────────────────── */
+@property --border-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+/* ── Variables ────────────────────────────────────────────────── */
+:root {
+  --bg: #0b0a10;
+  --surface: #14131f;
+  --surface-2: #1e1d2e;
+  --border: #2a2940;
+
+  --text: #e8e5f0;
+  --text-dim: #6e6b82;
+  --text-micro: #4a4860;
+
+  --accent: #f07a5c;
+  --accent-glow: rgba(240, 122, 92, 0.35);
+  --accent-cool: #7c6ff0;
+  --accent-cool-glow: rgba(124, 111, 240, 0.35);
+
+  --font-display: "Syne", sans-serif;
+  --font-body: "Outfit", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  --radius: 16px;
+}
+
+/* ── Reset & base ─────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(124, 111, 240, 0.04), transparent),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* ── App shell ────────────────────────────────────────────────── */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 32px;
+}
+
+/* ── Header ───────────────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 28px 0 20px;
+  flex-shrink: 0;
+}
+
+.logo {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  background: linear-gradient(135deg, var(--accent-cool), var(--accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.tagline {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+/* ── Main area ────────────────────────────────────────────────── */
+.main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding-bottom: 24px;
+}
+
+.main--player {
+  align-items: stretch;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Drop Zone
+   ══════════════════════════════════════════════════════════════ */
+.drop-zone {
+  position: relative;
+  width: 100%;
+  max-width: 540px;
+  aspect-ratio: 16 / 9;
+  border-radius: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  transition: transform 0.3s ease;
+}
+
+/* Rotating gradient border */
+.drop-zone::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 22px;
+  background: conic-gradient(
+    from var(--border-angle),
+    var(--accent-cool) 0%,
+    var(--accent) 30%,
+    transparent 50%,
+    transparent 80%,
+    var(--accent-cool) 100%
+  );
+  z-index: 0;
+  opacity: 0.45;
+  animation: border-rotate 8s linear infinite;
+  transition: opacity 0.4s ease, filter 0.4s ease;
+}
+
+/* Solid fill behind content so the conic-gradient is only the border */
+.drop-zone::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 20px;
+  background: var(--surface);
+  z-index: 0;
+}
+
+.drop-zone.drag-over {
+  transform: scale(1.02);
+}
+
+.drop-zone.drag-over::before {
+  opacity: 1;
+  filter: brightness(1.3);
+  animation-duration: 3s;
+}
+
+@keyframes border-rotate {
+  to {
+    --border-angle: 360deg;
+  }
+}
+
+.drop-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  pointer-events: none;
+}
+
+.drop-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(
+    135deg,
+    rgba(124, 111, 240, 0.13),
+    rgba(240, 122, 92, 0.13)
+  );
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-cool);
+  animation: icon-float 3s ease-in-out infinite;
+}
+
+.drop-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+@keyframes icon-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.drop-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.drop-hint {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Loading State
+   ══════════════════════════════════════════════════════════════ */
+.loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  animation: fade-in 0.3s ease;
+}
+
+.loading-bars {
+  display: flex;
+  gap: 5px;
+  align-items: flex-end;
+  height: 44px;
+}
+
+.loading-bar {
+  width: 5px;
+  border-radius: 3px;
+  background: linear-gradient(to top, var(--accent-cool), var(--accent));
+  animation: bar-pulse 1.2s ease-in-out infinite;
+}
+
+.loading-bar:nth-child(1) { height: 55%; }
+.loading-bar:nth-child(2) { height: 90%; }
+.loading-bar:nth-child(3) { height: 40%; }
+.loading-bar:nth-child(4) { height: 75%; }
+.loading-bar:nth-child(5) { height: 50%; }
+
+@keyframes bar-pulse {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+.loading-text {
+  font-size: 14px;
+  color: var(--text-dim);
+  font-weight: 400;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Player (spectrogram + controls)
+   ══════════════════════════════════════════════════════════════ */
+.player {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  flex: 1;
+  animation: player-in 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes player-in {
+  from {
+    opacity: 0;
+    transform: translateY(28px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ── Spectrogram container ─── */
+.spectrogram-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #000;
+  cursor: crosshair;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 24px 64px -16px rgba(0, 0, 0, 0.7),
+    0 0 48px -12px rgba(124, 111, 240, 0.06);
+}
+
+/* Subtle vignette */
+.spectrogram-wrap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  box-shadow: inset 0 0 50px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.spectrogram-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ── Playback cursor ─── */
+.cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  box-shadow:
+    0 0 8px var(--accent-glow),
+    0 0 24px var(--accent-glow);
+  pointer-events: none;
+  z-index: 2;
+  will-change: left;
+}
+
+/* ── Frequency axis ─── */
+.freq-label {
+  position: absolute;
+  right: 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.25);
+  pointer-events: none;
+  transform: translateY(-50%);
+  z-index: 1;
+  user-select: none;
+}
+
+/* ── Controls bar ─── */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 2px 8px;
+  flex-shrink: 0;
+}
+
+.play-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, var(--accent-cool), var(--accent));
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.2s ease;
+}
+
+.play-btn:hover {
+  transform: scale(1.08);
+  box-shadow: 0 0 24px -4px var(--accent-cool-glow);
+}
+
+.play-btn:active {
+  transform: scale(0.95);
+}
+
+.play-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.track-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.track-name {
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.time-display {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+}
+
+.time-display .sep {
+  opacity: 0.35;
+}
+
+/* ── Utility ──────────────────────────────────────────────────── */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
