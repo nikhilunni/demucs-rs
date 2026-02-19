@@ -5,3 +5,7 @@ edition = "2021"
 
 [dependencies]
 realfft = "3.5.0"
+burn = { version = "0.20.1", features = ["autotune"] }
+
+[dev-dependencies]
+burn = { version = "0.20.1", features = ["ndarray"] }

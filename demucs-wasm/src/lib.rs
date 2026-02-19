@@ -1,4 +1,4 @@
-use demucs_core::stft::Stft;
+use demucs_core::dsp::stft::Stft;
 use wasm_bindgen::prelude::*;
 
 const N_FFT: usize = 4096;

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { DropZone } from "./components/DropZone";
 import { LoadingState } from "./components/LoadingState";
+import { ModelSidebar } from "./components/ModelSidebar";
 import { SpectrogramView } from "./components/SpectrogramView";
 import { PlayerControls } from "./components/PlayerControls";
 import { useAudioPlayer } from "./hooks/useAudioPlayer";
@@ -30,6 +31,13 @@ export default function App() {
   const player = useAudioPlayer(audioUrl);
 
   const handleFile = useCallback(async (file: File) => {
+    if (phase.kind === "loading") return;
+
+    // Revoke previous audio URL if replacing a file
+    if (phase.kind === "ready") {
+      URL.revokeObjectURL(phase.audioUrl);
+    }
+
     setPhase({ kind: "loading" });
 
     // Yield to let React paint the loading state before heavy computation
@@ -63,7 +71,14 @@ export default function App() {
       alert("Could not decode that file — is it a valid audio file?");
       setPhase({ kind: "idle" });
     }
-  }, []);
+  }, [phase]);
+
+  const handleReset = useCallback(() => {
+    if (phase.kind === "ready") {
+      URL.revokeObjectURL(phase.audioUrl);
+    }
+    setPhase({ kind: "idle" });
+  }, [phase]);
 
   // Space bar → play / pause
   useEffect(() => {
@@ -77,33 +92,54 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [phase.kind, player.toggle]);
 
+  const tagline =
+    phase.kind === "idle"
+      ? "Source Separation"
+      : phase.kind === "loading"
+        ? "Analyzing..."
+        : phase.fileName;
+
   return (
     <div className="app">
       <header className="header">
         <h1 className="logo">Demucs</h1>
-        <span className="tagline">Spectrogram Viewer</span>
+        <span className="tagline">{tagline}</span>
+        {phase.kind === "ready" && (
+          <button
+            className="reset-btn"
+            onClick={handleReset}
+            title="Load a different file"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        )}
       </header>
 
       <main className={`main ${phase.kind === "ready" ? "main--player" : ""}`}>
         {phase.kind === "idle" && <DropZone onFile={handleFile} />}
         {phase.kind === "loading" && <LoadingState />}
         {phase.kind === "ready" && (
-          <div className="player">
-            <SpectrogramView
-              image={phase.image}
-              currentTime={player.currentTime}
-              duration={player.duration}
-              sampleRate={phase.sampleRate}
-              onSeek={player.seek}
-            />
-            <PlayerControls
-              fileName={phase.fileName}
-              isPlaying={player.isPlaying}
-              currentTime={player.currentTime}
-              duration={player.duration}
-              onToggle={player.toggle}
-            />
-          </div>
+          <>
+            <div className="player-area">
+              <SpectrogramView
+                image={phase.image}
+                currentTime={player.currentTime}
+                duration={player.duration}
+                sampleRate={phase.sampleRate}
+                onSeek={player.seek}
+              />
+              <PlayerControls
+                fileName={phase.fileName}
+                isPlaying={player.isPlaying}
+                currentTime={player.currentTime}
+                duration={player.duration}
+                onToggle={player.toggle}
+              />
+            </div>
+            <ModelSidebar onRun={(model) => console.log("Run separation:", model)} />
+          </>
         )}
       </main>
     </div>

@@ -90,9 +90,7 @@ impl Stft {
                 .unwrap();
 
             // realfft does not normalize the inverse transform
-            frame_time
-                .iter_mut()
-                .for_each(|x| *x /= self.n_fft as f32);
+            frame_time.iter_mut().for_each(|x| *x /= self.n_fft as f32);
 
             let offset = f * self.hop_length;
             for i in 0..self.n_fft {
@@ -109,6 +107,10 @@ impl Stft {
 
         let start = self.n_fft / 2;
         output[start..start + length].to_vec()
+    }
+
+    pub fn num_bins(&self) -> usize {
+        self.n_fft / 2 + 1
     }
 }
 
