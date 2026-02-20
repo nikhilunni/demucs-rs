@@ -1862,6 +1862,7 @@ dependencies = [
 name = "demucs-wasm"
 version = "0.1.0"
 dependencies = [
+ "burn",
  "demucs-core",
  "getrandom 0.3.4",
  "serde",

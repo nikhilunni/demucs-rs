@@ -5,6 +5,7 @@ import { ProgressBar } from "./ProgressBar";
 
 interface Props {
   onRun: (model: SelectedModel) => void;
+  disabled?: boolean;
 }
 
 function ModelCard({
@@ -85,18 +86,19 @@ function StemChips({
   );
 }
 
-export function ModelSidebar({ onRun }: Props) {
+export function ModelSidebar({ onRun, disabled = false }: Props) {
+  const models = getModels();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedStems, setSelectedStems] = useState<StemId[]>([]);
 
   // Download hooks for each model
-  const dl0 = useModelDownload(MODELS[0].id);
-  const dl1 = useModelDownload(MODELS[1].id);
-  const dl2 = useModelDownload(MODELS[2].id);
+  const dl0 = useModelDownload(models[0].id);
+  const dl1 = useModelDownload(models[1].id);
+  const dl2 = useModelDownload(models[2].id);
   const downloads = [dl0, dl1, dl2];
 
-  const selectedVariant = MODELS.find((m) => m.id === selectedId) ?? null;
-  const selectedIdx = MODELS.findIndex((m) => m.id === selectedId);
+  const selectedVariant = models.find((m) => m.id === selectedId) ?? null;
+  const selectedIdx = models.findIndex((m) => m.id === selectedId);
   const selectedDl = selectedIdx >= 0 ? downloads[selectedIdx] : null;
 
   // When model selection changes, reset stems to all
@@ -107,7 +109,7 @@ export function ModelSidebar({ onRun }: Props) {
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCardClick = (idx: number) => {
-    const model = MODELS[idx];
+    const model = models[idx];
     setSelectedId(model.id);
 
     // Auto-start download if not cached
@@ -128,6 +130,7 @@ export function ModelSidebar({ onRun }: Props) {
   };
 
   const canRun =
+    !disabled &&
     selectedVariant !== null &&
     selectedDl?.state.status === "cached" &&
     selectedStems.length > 0;
@@ -137,7 +140,7 @@ export function ModelSidebar({ onRun }: Props) {
       <h3 className="model-sidebar__heading">Model</h3>
 
       <div className="model-sidebar__cards">
-        {MODELS.map((variant, i) => (
+        {models.map((variant, i) => (
           <ModelCard
             key={variant.id}
             variant={variant}

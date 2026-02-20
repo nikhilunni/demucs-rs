@@ -724,6 +724,125 @@ body {
   cursor: not-allowed;
 }
 
+/* ══════════════════════════════════════════════════════════════
+   Separating Indicator
+   ══════════════════════════════════════════════════════════════ */
+.separating-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 24px 0;
+  animation: fade-in 0.3s ease;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Stem Results
+   ══════════════════════════════════════════════════════════════ */
+.stem-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 8px 0;
+  animation: fade-in 0.4s ease;
+}
+
+.stem-results__play-all {
+  align-self: flex-start;
+  padding: 8px 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.15s;
+}
+
+.stem-results__play-all:hover {
+  border-color: var(--accent-cool);
+  transform: scale(1.03);
+}
+
+.stem-row {
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.stem-row__controls {
+  width: 80px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+}
+
+.stem-row__name {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stem-row__buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.stem-row__solo,
+.stem-row__mute {
+  width: 24px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text-micro);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.stem-row__solo:hover,
+.stem-row__mute:hover {
+  border-color: var(--text-micro);
+  color: var(--text-dim);
+}
+
+.stem-row__solo--active {
+  background: rgba(124, 111, 240, 0.2);
+  border-color: var(--accent-cool);
+  color: var(--accent-cool);
+}
+
+.stem-row__mute--active {
+  background: rgba(240, 122, 92, 0.2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.stem-row__spectrogram {
+  flex: 1;
+  min-width: 0;
+}
+
+.stem-row__spectrogram .spectrogram-wrap {
+  height: 100px;
+}
+
 /* ── Utility ──────────────────────────────────────────────────── */
 @keyframes fade-in {
   from {

@@ -12,8 +12,8 @@ use crate::model::metadata::ModelInfo;
 use crate::model::transformer::{
     CrossAttentionLayer, CrossDomainTransformer, SelfAttentionLayer, TransformerLayer,
 };
-use crate::weights::tensor_store::{split_1d, split_dim0, to_tensor_data, transpose_2d};
 use crate::weights::tensor_store::TensorStore;
+use crate::weights::tensor_store::{split_1d, split_dim0, to_tensor_data, transpose_2d};
 use crate::weights::WeightError;
 
 // ─── Primitive loaders ───────────────────────────────────────────────────────
@@ -171,8 +171,18 @@ fn load_henc_layer<B: Backend>(
     device: &B::Device,
 ) -> Result<(), WeightError> {
     load_conv1d(&mut enc.conv, store, &format!("{}.conv", prefix), device)?;
-    load_dconv(&mut enc.dconv, store, &format!("{}.dconv.layers", prefix), device)?;
-    load_conv1d(&mut enc.rewrite, store, &format!("{}.rewrite", prefix), device)?;
+    load_dconv(
+        &mut enc.dconv,
+        store,
+        &format!("{}.dconv.layers", prefix),
+        device,
+    )?;
+    load_conv1d(
+        &mut enc.rewrite,
+        store,
+        &format!("{}.rewrite", prefix),
+        device,
+    )?;
     Ok(())
 }
 
@@ -183,8 +193,18 @@ fn load_tenc_layer<B: Backend>(
     device: &B::Device,
 ) -> Result<(), WeightError> {
     load_conv1d(&mut enc.conv, store, &format!("{}.conv", prefix), device)?;
-    load_dconv(&mut enc.dconv, store, &format!("{}.dconv.layers", prefix), device)?;
-    load_conv1d(&mut enc.rewrite, store, &format!("{}.rewrite", prefix), device)?;
+    load_dconv(
+        &mut enc.dconv,
+        store,
+        &format!("{}.dconv.layers", prefix),
+        device,
+    )?;
+    load_conv1d(
+        &mut enc.rewrite,
+        store,
+        &format!("{}.rewrite", prefix),
+        device,
+    )?;
     Ok(())
 }
 
@@ -194,9 +214,24 @@ fn load_hdec_layer<B: Backend>(
     prefix: &str,
     device: &B::Device,
 ) -> Result<(), WeightError> {
-    load_conv1d(&mut dec.rewrite, store, &format!("{}.rewrite", prefix), device)?;
-    load_dconv(&mut dec.dconv, store, &format!("{}.dconv.layers", prefix), device)?;
-    load_conv_tr1d(&mut dec.conv_tr, store, &format!("{}.conv_tr", prefix), device)?;
+    load_conv1d(
+        &mut dec.rewrite,
+        store,
+        &format!("{}.rewrite", prefix),
+        device,
+    )?;
+    load_dconv(
+        &mut dec.dconv,
+        store,
+        &format!("{}.dconv.layers", prefix),
+        device,
+    )?;
+    load_conv_tr1d(
+        &mut dec.conv_tr,
+        store,
+        &format!("{}.conv_tr", prefix),
+        device,
+    )?;
     Ok(())
 }
 
@@ -206,9 +241,24 @@ fn load_tdec_layer<B: Backend>(
     prefix: &str,
     device: &B::Device,
 ) -> Result<(), WeightError> {
-    load_conv1d(&mut dec.rewrite, store, &format!("{}.rewrite", prefix), device)?;
-    load_dconv(&mut dec.dconv, store, &format!("{}.dconv.layers", prefix), device)?;
-    load_conv_tr1d(&mut dec.conv_tr, store, &format!("{}.conv_tr", prefix), device)?;
+    load_conv1d(
+        &mut dec.rewrite,
+        store,
+        &format!("{}.rewrite", prefix),
+        device,
+    )?;
+    load_dconv(
+        &mut dec.dconv,
+        store,
+        &format!("{}.dconv.layers", prefix),
+        device,
+    )?;
+    load_conv_tr1d(
+        &mut dec.conv_tr,
+        store,
+        &format!("{}.conv_tr", prefix),
+        device,
+    )?;
     Ok(())
 }
 
@@ -263,7 +313,12 @@ fn load_mha<B: Backend>(
     )));
 
     // 3. Output projection
-    load_linear(&mut attn.output, store, &format!("{}.out_proj", prefix), device)?;
+    load_linear(
+        &mut attn.output,
+        store,
+        &format!("{}.out_proj", prefix),
+        device,
+    )?;
 
     Ok(())
 }
@@ -276,13 +331,48 @@ fn load_self_attn_layer<B: Backend>(
     prefix: &str,
     device: &B::Device,
 ) -> Result<(), WeightError> {
-    load_layernorm(&mut layer.norm1, store, &format!("{}.norm1", prefix), device)?;
-    load_mha(&mut layer.attn, store, &format!("{}.self_attn", prefix), device)?;
-    load_layer_scale(&mut layer.gamma_1, store, &format!("{}.gamma_1", prefix), device)?;
-    load_layernorm(&mut layer.norm2, store, &format!("{}.norm2", prefix), device)?;
-    load_linear(&mut layer.linear1, store, &format!("{}.linear1", prefix), device)?;
-    load_linear(&mut layer.linear2, store, &format!("{}.linear2", prefix), device)?;
-    load_layer_scale(&mut layer.gamma_2, store, &format!("{}.gamma_2", prefix), device)?;
+    load_layernorm(
+        &mut layer.norm1,
+        store,
+        &format!("{}.norm1", prefix),
+        device,
+    )?;
+    load_mha(
+        &mut layer.attn,
+        store,
+        &format!("{}.self_attn", prefix),
+        device,
+    )?;
+    load_layer_scale(
+        &mut layer.gamma_1,
+        store,
+        &format!("{}.gamma_1", prefix),
+        device,
+    )?;
+    load_layernorm(
+        &mut layer.norm2,
+        store,
+        &format!("{}.norm2", prefix),
+        device,
+    )?;
+    load_linear(
+        &mut layer.linear1,
+        store,
+        &format!("{}.linear1", prefix),
+        device,
+    )?;
+    load_linear(
+        &mut layer.linear2,
+        store,
+        &format!("{}.linear2", prefix),
+        device,
+    )?;
+    load_layer_scale(
+        &mut layer.gamma_2,
+        store,
+        &format!("{}.gamma_2", prefix),
+        device,
+    )?;
     if let Some(ref mut norm_out) = layer.norm_out {
         load_layernorm(norm_out, store, &format!("{}.norm_out", prefix), device)?;
     }
@@ -296,14 +386,54 @@ fn load_cross_attn_layer<B: Backend>(
     device: &B::Device,
 ) -> Result<(), WeightError> {
     // Cross-attention uses .cross_attn in PyTorch (not .self_attn)
-    load_layernorm(&mut layer.norm1, store, &format!("{}.norm1", prefix), device)?;
-    load_layernorm(&mut layer.norm2, store, &format!("{}.norm2", prefix), device)?;
-    load_mha(&mut layer.attn, store, &format!("{}.cross_attn", prefix), device)?;
-    load_layer_scale(&mut layer.gamma_1, store, &format!("{}.gamma_1", prefix), device)?;
-    load_layernorm(&mut layer.norm3, store, &format!("{}.norm3", prefix), device)?;
-    load_linear(&mut layer.linear1, store, &format!("{}.linear1", prefix), device)?;
-    load_linear(&mut layer.linear2, store, &format!("{}.linear2", prefix), device)?;
-    load_layer_scale(&mut layer.gamma_2, store, &format!("{}.gamma_2", prefix), device)?;
+    load_layernorm(
+        &mut layer.norm1,
+        store,
+        &format!("{}.norm1", prefix),
+        device,
+    )?;
+    load_layernorm(
+        &mut layer.norm2,
+        store,
+        &format!("{}.norm2", prefix),
+        device,
+    )?;
+    load_mha(
+        &mut layer.attn,
+        store,
+        &format!("{}.cross_attn", prefix),
+        device,
+    )?;
+    load_layer_scale(
+        &mut layer.gamma_1,
+        store,
+        &format!("{}.gamma_1", prefix),
+        device,
+    )?;
+    load_layernorm(
+        &mut layer.norm3,
+        store,
+        &format!("{}.norm3", prefix),
+        device,
+    )?;
+    load_linear(
+        &mut layer.linear1,
+        store,
+        &format!("{}.linear1", prefix),
+        device,
+    )?;
+    load_linear(
+        &mut layer.linear2,
+        store,
+        &format!("{}.linear2", prefix),
+        device,
+    )?;
+    load_layer_scale(
+        &mut layer.gamma_2,
+        store,
+        &format!("{}.gamma_2", prefix),
+        device,
+    )?;
     if let Some(ref mut norm_out) = layer.norm_out {
         load_layernorm(norm_out, store, &format!("{}.norm_out", prefix), device)?;
     }
@@ -348,7 +478,12 @@ fn load_cross_domain_transformer<B: Backend>(
 
     // Input norms
     load_layernorm(&mut ct.norm_in, store, "crosstransformer.norm_in", device)?;
-    load_layernorm(&mut ct.norm_in_t, store, "crosstransformer.norm_in_t", device)?;
+    load_layernorm(
+        &mut ct.norm_in_t,
+        store,
+        "crosstransformer.norm_in_t",
+        device,
+    )?;
 
     // Transformer layers
     for (i, layer) in ct.layers.iter_mut().enumerate() {
@@ -606,10 +741,8 @@ mod tests {
             })
             .collect();
 
-        let views_ref: Vec<(&str, safetensors::tensor::TensorView<'_>)> = views
-            .iter()
-            .map(|(n, v)| (n.as_str(), v.clone()))
-            .collect();
+        let views_ref: Vec<(&str, safetensors::tensor::TensorView<'_>)> =
+            views.iter().map(|(n, v)| (n.as_str(), v.clone())).collect();
 
         serialize(views_ref, &None).unwrap()
     }

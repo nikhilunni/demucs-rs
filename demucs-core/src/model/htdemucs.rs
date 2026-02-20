@@ -3,6 +3,7 @@ use burn::{module::Module, prelude::Backend, Tensor};
 use crate::{
     model::{
         conv::{HDecLayer, HEncLayer, TDecLayer, TEncLayer},
+        metadata::ModelInfo,
         transformer::CrossDomainTransformer,
     },
     AUDIO_CHANNELS, CHANNELS, DEPTH, GROWTH, N_FFT,
@@ -14,7 +15,7 @@ pub(crate) struct HyperParameters {
 }
 
 impl HyperParameters {
-    pub(crate) fn from_model_info(info: &crate::model::metadata::ModelInfo) -> Self {
+    pub(crate) fn from_model_info(info: &ModelInfo) -> Self {
         let n_sources = info.stems.len();
         let bottom_channels = if n_sources == 6 {
             // 6-stem: bottleneck_ch == bottom_channels == 384

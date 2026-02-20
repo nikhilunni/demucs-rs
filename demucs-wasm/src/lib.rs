@@ -1,8 +1,12 @@
 use demucs_core::dsp::stft::Stft;
-use demucs_core::model::metadata::{self, ALL_MODELS};
+use demucs_core::model::metadata::{self, ALL_MODELS, StemId, HTDEMUCS_ID, HTDEMUCS_6S_ID, HTDEMUCS_FT_ID};
 use demucs_core::weights::tensor_store;
+use demucs_core::{Demucs, ModelOptions};
+use burn::backend::NdArray;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
+
+type B = NdArray<f32>;
 
 const N_FFT: usize = 4096;
 const HOP_LENGTH: usize = 1024;
@@ -147,4 +151,110 @@ pub fn validate_model_weights(bytes: &[u8], model_id: &str) -> JsValue {
         })
         .unwrap(),
     }
+}
+
+// ─── Separation API ────────────────────────────────────────────────────────
+
+/// Result of running source separation. Owns a flat interleaved buffer:
+/// `[stem0_L | stem0_R | stem1_L | stem1_R | ...]`
+#[wasm_bindgen]
+pub struct SeparationResult {
+    audio: Vec<f32>,
+    stem_names: Vec<String>,
+    n_samples: u32,
+}
+
+#[wasm_bindgen]
+impl SeparationResult {
+    #[wasm_bindgen(getter)]
+    pub fn num_stems(&self) -> u32 {
+        self.stem_names.len() as u32
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn n_samples(&self) -> u32 {
+        self.n_samples
+    }
+
+    /// Returns stem names as a JS array of strings.
+    pub fn stem_names(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.stem_names).unwrap()
+    }
+
+    /// Move the audio buffer to JS, consuming this result.
+    pub fn take_audio(self) -> Vec<f32> {
+        self.audio
+    }
+}
+
+fn parse_stem_id(s: &str) -> Option<StemId> {
+    match s {
+        "drums" => Some(StemId::Drums),
+        "bass" => Some(StemId::Bass),
+        "other" => Some(StemId::Other),
+        "vocals" => Some(StemId::Vocals),
+        "guitar" => Some(StemId::Guitar),
+        "piano" => Some(StemId::Piano),
+        _ => None,
+    }
+}
+
+/// Run source separation on stereo audio.
+///
+/// - `model_bytes`: safetensors weights from IndexedDB
+/// - `model_id`: e.g. "htdemucs", "htdemucs_6s", "htdemucs_ft"
+/// - `selected_stems`: JS string array of stem names to extract
+/// - `left`, `right`: stereo PCM samples
+///
+/// Returns a `SeparationResult` with flat buffer: per stem, L then R channel.
+#[wasm_bindgen]
+pub fn separate(
+    model_bytes: &[u8],
+    model_id: &str,
+    selected_stems: JsValue,
+    left: &[f32],
+    right: &[f32],
+) -> Result<SeparationResult, JsError> {
+    let stem_strs: Vec<String> = serde_wasm_bindgen::from_value(selected_stems)
+        .map_err(|e| JsError::new(&format!("Invalid stems array: {}", e)))?;
+
+    let opts = match model_id {
+        HTDEMUCS_ID => ModelOptions::FourStem,
+        HTDEMUCS_6S_ID => ModelOptions::SixStem,
+        HTDEMUCS_FT_ID => {
+            let stems: Vec<StemId> = stem_strs
+                .iter()
+                .filter_map(|s| parse_stem_id(s))
+                .collect();
+            ModelOptions::FineTuned(stems)
+        }
+        _ => return Err(JsError::new(&format!("Unknown model: {}", model_id))),
+    };
+
+    let device = Default::default();
+    let model = Demucs::<B>::from_bytes(opts, model_bytes, device)
+        .map_err(|e| JsError::new(&format!("Failed to load model: {}", e)))?;
+
+    let stems = model.separate(left, right);
+    let n_samples = left.len() as u32;
+
+    // Build flat buffer and collect names
+    let mut audio = Vec::with_capacity(stems.len() * 2 * left.len());
+    let mut stem_names = Vec::with_capacity(stems.len());
+    for stem in &stems {
+        // For non-fine-tuned models, filter to selected stems
+        let name = stem.id.as_str().to_string();
+        if !stem_strs.contains(&name) {
+            continue;
+        }
+        audio.extend_from_slice(&stem.left);
+        audio.extend_from_slice(&stem.right);
+        stem_names.push(name);
+    }
+
+    Ok(SeparationResult {
+        audio,
+        stem_names,
+        n_samples,
+    })
 }

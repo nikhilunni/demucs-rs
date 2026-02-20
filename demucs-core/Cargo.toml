@@ -3,6 +3,10 @@ name = "demucs-core"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+ndarray = ["burn/ndarray"]
+
 [dependencies]
 realfft = "3.5.0"
 burn = { version = "0.20.1", features = ["autotune"] }

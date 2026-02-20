@@ -38,7 +38,7 @@ pub struct ModelInfo {
 use StemId::*;
 
 pub const HTDEMUCS: ModelInfo = ModelInfo {
-    id: "htdemucs",
+    id: HTDEMUCS_ID,
     label: "Standard",
     description: "4 stems \u{2014} balanced speed and quality",
     filename: "htdemucs.safetensors",
@@ -48,7 +48,7 @@ pub const HTDEMUCS: ModelInfo = ModelInfo {
 };
 
 pub const HTDEMUCS_6S: ModelInfo = ModelInfo {
-    id: "htdemucs_6s",
+    id: HTDEMUCS_6S_ID,
     label: "6-Stem",
     description: "6 stems \u{2014} adds guitar and piano",
     filename: "htdemucs_6s.safetensors",
@@ -58,7 +58,7 @@ pub const HTDEMUCS_6S: ModelInfo = ModelInfo {
 };
 
 pub const HTDEMUCS_FT: ModelInfo = ModelInfo {
-    id: "htdemucs_ft",
+    id: HTDEMUCS_FT_ID,
     label: "Fine-Tuned",
     description: "4 stems \u{2014} best quality, larger download",
     filename: "htdemucs_ft.safetensors",
@@ -75,3 +75,7 @@ pub const HF_BASE_URL: &str =
 pub fn download_url(info: &ModelInfo) -> String {
     format!("{}{}", HF_BASE_URL, info.filename)
 }
+
+pub const HTDEMUCS_ID: &str = "htdemucs";
+pub const HTDEMUCS_6S_ID: &str = "htdemucs_6s";
+pub const HTDEMUCS_FT_ID: &str = "htdemucs_ft";

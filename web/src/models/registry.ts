@@ -2,7 +2,7 @@
  * Model registry — derived from Rust metadata via WASM.
  *
  * Call `initRegistry()` after WASM is initialized to populate the model list.
- * Before that, `MODELS` is empty and `modelUrl()` will throw.
+ * Before that, `getModels()` will throw.
  */
 
 export type StemId = "drums" | "bass" | "other" | "vocals" | "guitar" | "piano";

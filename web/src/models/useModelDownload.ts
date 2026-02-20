@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MODELS, modelUrl } from "./registry";
+import { getModels, modelUrl } from "./registry";
 import { cacheModel, isCached } from "./modelCache";
+import { validate_model_weights } from "../wasm/demucs_wasm.js";
 
 export type DownloadState =
   | { status: "checking" }
@@ -35,7 +36,7 @@ export function useModelDownload(modelId: string): {
   }, [modelId]);
 
   const start = useCallback(() => {
-    const variant = MODELS.find((m) => m.id === modelId);
+    const variant = getModels().find((m) => m.id === modelId);
     if (!variant) return;
 
     const controller = new AbortController();
@@ -74,6 +75,12 @@ export function useModelDownload(modelId: string): {
         for (const chunk of chunks) {
           buf.set(chunk, offset);
           offset += chunk.length;
+        }
+
+        // Validate safetensors structure before caching
+        const validation = validate_model_weights(buf, modelId);
+        if (!validation.valid) {
+          throw new Error(`Invalid model weights: ${validation.error}`);
         }
 
         await cacheModel(modelId, buf.buffer);
