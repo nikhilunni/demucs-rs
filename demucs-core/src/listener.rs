@@ -47,7 +47,7 @@ impl std::fmt::Display for Domain {
 #[derive(Debug)]
 pub enum ForwardEvent {
     /// Input z-normalization complete.
-    Normalized { freq_mean: f32, freq_std: f32, time_mean: f32, time_std: f32 },
+    Normalized,
 
     /// Normalized CaC tensor (input to freq encoder[0]).
     NormalizedCac { stats: Option<TensorStats> },
@@ -121,8 +121,8 @@ pub struct DebugListener;
 impl ForwardListener for DebugListener {
     fn on_event(&mut self, event: ForwardEvent) {
         match &event {
-            ForwardEvent::Normalized { freq_mean, freq_std, time_mean, time_std } => {
-                eprintln!("[debug] normalized  freq: mean={freq_mean:+.8} std={freq_std:.8}  time: mean={time_mean:+.8} std={time_std:.8}");
+            ForwardEvent::Normalized => {
+                eprintln!("[debug] normalized");
             }
             ForwardEvent::NormalizedCac { stats } => {
                 let s = stats.as_ref().map(|s| s.to_string()).unwrap_or_default();

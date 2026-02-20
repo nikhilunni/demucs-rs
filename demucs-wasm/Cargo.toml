@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 demucs-core = { path = "../demucs-core", features = ["wgpu"] }
 burn = { version = "0.20.1", features = ["wgpu"] }
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"

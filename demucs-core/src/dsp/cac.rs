@@ -42,14 +42,16 @@ pub fn stft_to_cac<B: Backend>(
 ///
 /// Returns a flat vector of `num_frames × (freq_bins + 1)` complex values, with zeroed Nyquist
 /// bins appended to each frame.
-pub fn cac_to_stft<B: Backend>(tensor: &Tensor<B, 3>) -> Result<Vec<Complex<f32>>> {
+pub async fn cac_to_stft<B: Backend>(tensor: &Tensor<B, 3>) -> Result<Vec<Complex<f32>>> {
     let [_, freq_bins, num_frames] = tensor.dims();
     let bins = freq_bins + 1; // Add Nyquist bin
 
     let mut spectrogram = vec![Complex::new(0.0, 0.0); num_frames * bins];
 
     let data: Vec<f32> = tensor
-        .to_data()
+        .to_data_async()
+        .await
+        .map_err(|e| DemucsError::Tensor(format!("cac_to_stft async read failed: {}", e)))?
         .to_vec()
         .map_err(|e| DemucsError::Tensor(format!("cac_to_stft conversion failed: {}", e)))?;
     let (reals, imags) = data.split_at(freq_bins * num_frames);
@@ -151,7 +153,7 @@ mod tests {
 
         let device = Default::default();
         let tensor = stft_to_cac::<B>(&spec, n_fft, &device);
-        let roundtrip = cac_to_stft::<B>(&tensor).unwrap();
+        let roundtrip = pollster::block_on(cac_to_stft::<B>(&tensor)).unwrap();
 
         // cac_to_stft returns n_fft/2+1 bins per frame (adds zero Nyquist)
         let bins_out = freq_bins + 1;

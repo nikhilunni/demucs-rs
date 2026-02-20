@@ -8,10 +8,11 @@ default = []
 ndarray = ["burn/ndarray"]
 wgpu = ["burn/wgpu"]
 cuda = ["burn/cuda"]
+autotune = ["burn/autotune"]
 
 [dependencies]
 realfft = "3.5.0"
-burn = { version = "0.20.1", features = ["autotune"] }
+burn = { version = "0.20.1" }
 safetensors = "0.5"
 half = "2"
 rubato = "0.14"
@@ -22,3 +23,4 @@ dirs = "5"
 [dev-dependencies]
 burn = { version = "0.20.1", features = ["ndarray"] }
 safetensors = "0.5"
+pollster = "0.4"

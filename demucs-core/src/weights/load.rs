@@ -1,6 +1,6 @@
 use burn::module::Param;
 use burn::nn::conv::{Conv1d, Conv2d, ConvTranspose1d, ConvTranspose2d};
-use burn::nn::{Embedding, GroupNorm, LayerNorm, Linear};
+use burn::nn::{GroupNorm, LayerNorm, Linear};
 use burn::prelude::Backend;
 use burn::tensor::Tensor;
 
@@ -144,17 +144,6 @@ fn load_groupnorm<B: Backend>(
             device,
         )));
     }
-    Ok(())
-}
-
-fn load_embedding<B: Backend>(
-    emb: &mut Embedding<B>,
-    store: &mut TensorStore,
-    prefix: &str,
-    device: &B::Device,
-) -> Result<(), WeightError> {
-    let w = store.take(&format!("{}.weight", prefix))?;
-    emb.weight = Param::from_tensor(Tensor::from_data(to_tensor_data(w), device));
     Ok(())
 }
 
@@ -585,12 +574,14 @@ fn load_htdemucs_from_store<B: Backend>(
         load_tdec_layer(dec, store, &format!("tdecoder.{}", i), device)?;
     }
 
-    // Freq embedding (at model level, not in transformer)
-    // ScaledEmbedding stores raw weights; forward() multiplies by scale (10).
-    // Bake in the scale here so forward just does a simple lookup.
+    // Freq embedding: ScaledEmbedding has scale=10, bake it into the weights on the CPU
+    // side to avoid a GPU multiply during loading (required for WASM/WebGPU compat).
     // The 0.2 freq_emb_scale is applied separately in HTDemucs::forward_with_listener.
-    load_embedding(&mut model.freq_emb, store, "freq_emb.embedding", device)?;
-    model.freq_emb.weight = Param::from_tensor(model.freq_emb.weight.val() * 10.0);
+    let mut emb_data = store.take("freq_emb.embedding.weight")?;
+    for v in &mut emb_data.data {
+        *v *= 10.0;
+    }
+    model.freq_emb.weight = Param::from_tensor(Tensor::from_data(to_tensor_data(emb_data), device));
 
     // Cross-domain transformer (keys are at root level, not under a prefix)
     load_cross_domain_transformer(&mut model.crosstransformer, store, device)?;

@@ -93,7 +93,7 @@ fn stft_cac_roundtrip_mono() {
     assert_eq!(freq_bins, N_FFT / 2);
 
     // Inverse: CaC tensor → complex spectrogram (adds Nyquist) → waveform
-    let spec_rt = cac_to_stft::<B>(&cac).unwrap();
+    let spec_rt = pollster::block_on(cac_to_stft::<B>(&cac)).unwrap();
     let reconstructed = stft.inverse(&spec_rt, n_samples).unwrap();
 
     assert_eq!(reconstructed.len(), n_samples);
@@ -157,8 +157,8 @@ fn full_stereo_dsp_roundtrip() {
     let right_cac_out = freq_s.narrow(0, 2, 2);          // [2, F, T]
 
     // iSTFT reconstructs padded_len, then we trim to n_samples
-    let left_recon = stft.inverse(&cac_to_stft::<B>(&left_cac_out).unwrap(), padded_len).unwrap();
-    let right_recon = stft.inverse(&cac_to_stft::<B>(&right_cac_out).unwrap(), padded_len).unwrap();
+    let left_recon = stft.inverse(&pollster::block_on(cac_to_stft::<B>(&left_cac_out)).unwrap(), padded_len).unwrap();
+    let right_recon = stft.inverse(&pollster::block_on(cac_to_stft::<B>(&right_cac_out)).unwrap(), padded_len).unwrap();
 
     // ── Verify interior ────────────────────────────────────────────────
     assert_eq!(left_recon.len(), padded_len);

@@ -35,16 +35,16 @@ impl<B: Backend> Demucs<B> {
         Ok(Self { opts, models, device })
     }
 
-    pub fn separate(
+    pub async fn separate(
         &self,
         left_channel: &[f32],
         right_channel: &[f32],
         sample_rate: u32,
     ) -> Result<Vec<Stem>> {
-        self.separate_with_listener(left_channel, right_channel, sample_rate, &mut NoOpListener)
+        self.separate_with_listener(left_channel, right_channel, sample_rate, &mut NoOpListener).await
     }
 
-    pub fn separate_with_listener(
+    pub async fn separate_with_listener(
         &self,
         left_channel: &[f32],
         right_channel: &[f32],
@@ -102,7 +102,7 @@ impl<B: Backend> Demucs<B> {
                     self.models[0].forward_with_listener(freq, time, listener)?;
                 let stems = extract_all_stems::<B>(
                     &freq_out, &time_out, info, n_frames, padded_len, n_samples, &mut stft,
-                )?;
+                ).await?;
                 for (i, _) in stems.iter().enumerate() {
                     listener.on_event(ForwardEvent::StemDone {
                         index: i,
@@ -121,7 +121,7 @@ impl<B: Backend> Demucs<B> {
                         .forward_with_listener(freq.clone(), time.clone(), listener)?;
                     let stem = extract_single_stem::<B>(
                         &freq_out, &time_out, i, stem_id, n_frames, padded_len, n_samples, &mut stft,
-                    )?;
+                    ).await?;
                     stems.push(stem);
                     listener.on_event(ForwardEvent::StemDone {
                         index: i,
@@ -199,7 +199,7 @@ fn build_time_tensor<B: Backend>(
 }
 
 /// Extract all stems from a single model's output (4-stem or 6-stem).
-fn extract_all_stems<B: Backend>(
+async fn extract_all_stems<B: Backend>(
     freq_out: &Tensor<B, 4>,  // [1, n_sources * 4, F, padded_T]
     time_out: &Tensor<B, 3>,  // [1, n_sources * 2, padded_T]
     info: &ModelInfo,
@@ -208,17 +208,17 @@ fn extract_all_stems<B: Backend>(
     n_samples: usize,
     stft: &mut Stft,
 ) -> Result<Vec<Stem>> {
-    info.stems
-        .iter()
-        .enumerate()
-        .map(|(i, &stem_id)| {
-            extract_single_stem::<B>(freq_out, time_out, i, stem_id, n_frames, padded_len, n_samples, stft)
-        })
-        .collect()
+    let mut stems = Vec::with_capacity(info.stems.len());
+    for (i, &stem_id) in info.stems.iter().enumerate() {
+        stems.push(
+            extract_single_stem::<B>(freq_out, time_out, i, stem_id, n_frames, padded_len, n_samples, stft).await?
+        );
+    }
+    Ok(stems)
 }
 
 /// Extract one stem by index from the model output, ISTFT, and combine freq + time.
-fn extract_single_stem<B: Backend>(
+async fn extract_single_stem<B: Backend>(
     freq_out: &Tensor<B, 4>,  // [1, n_sources * 4, F, padded_T]
     time_out: &Tensor<B, 3>,  // [1, n_sources * 2, padded_T]
     stem_idx: usize,
@@ -235,30 +235,15 @@ fn extract_single_stem<B: Backend>(
 
     // Split into left [2, F, T] and right [2, F, T]
     let left_cac = freq_s.clone().narrow(0, 0, 2);
-    let right_cac = freq_s.clone().narrow(0, 2, 2);
+    let right_cac = freq_s.narrow(0, 2, 2);
 
     // CaC → complex spectrogram → ISTFT → waveform (reconstruct padded_len, then trim)
     // Python _ispec reconstructs training_length samples, then forward() trims to original
-    let left_spec = cac_to_stft::<B>(&left_cac)?;
-    let right_spec = cac_to_stft::<B>(&right_cac)?;
-
-    // Debug: CaC and spec stats
-    {
-        let cac_data: Vec<f32> = freq_s.clone().to_data().to_vec().unwrap_or_default();
-        let cac_rms = (cac_data.iter().map(|x| x * x).sum::<f32>() / cac_data.len() as f32).sqrt();
-        let spec_rms = (left_spec.iter().map(|c| c.re * c.re + c.im * c.im).sum::<f32>() / left_spec.len() as f32).sqrt();
-        eprintln!("[debug-stem] {}: cac_rms={:.6} spec_rms={:.6} n_frames={} padded_len={}",
-            stem_id.as_str(), cac_rms, spec_rms, n_frames, padded_len);
-    }
+    let left_spec = cac_to_stft::<B>(&left_cac).await?;
+    let right_spec = cac_to_stft::<B>(&right_cac).await?;
 
     let left_freq_wav = stft.inverse(&left_spec, padded_len)?;
     let right_freq_wav = stft.inverse(&right_spec, padded_len)?;
-
-    // Debug: iSTFT output stats
-    {
-        let freq_rms = (left_freq_wav[..n_samples].iter().map(|x| x * x).sum::<f32>() / n_samples as f32).sqrt();
-        eprintln!("[debug-stem] {}: freq_wav_rms={:.6}", stem_id.as_str(), freq_rms);
-    }
 
     // Time: extract this stem's stereo [2] from [1, n_sources*2, padded_T], trim to n_samples
     let time_data: Vec<f32> = time_out
@@ -266,16 +251,12 @@ fn extract_single_stem<B: Backend>(
         .narrow(1, stem_idx * 2, 2)
         .narrow(2, 0, n_samples)
         .reshape([2 * n_samples])
-        .to_data()
+        .to_data_async()
+        .await
+        .map_err(|e| DemucsError::Tensor(format!("time data async read failed: {}", e)))?
         .to_vec()
         .map_err(|e| DemucsError::Tensor(format!("time data extraction failed: {}", e)))?;
     let (left_time, right_time) = time_data.split_at(n_samples);
-
-    // Debug: time branch stats
-    {
-        let time_rms = (left_time.iter().map(|x| x * x).sum::<f32>() / n_samples as f32).sqrt();
-        eprintln!("[debug-stem] {}: time_wav_rms={:.6}", stem_id.as_str(), time_rms);
-    }
 
     // Combine: freq waveform (trimmed to n_samples) + time waveform
     let left: Vec<f32> = left_freq_wav[..n_samples]
@@ -288,12 +269,6 @@ fn extract_single_stem<B: Backend>(
         .zip(right_time)
         .map(|(f, t)| f + t)
         .collect();
-
-    // Debug: combined output stats
-    {
-        let combined_rms = (left.iter().map(|x| x * x).sum::<f32>() / left.len() as f32).sqrt();
-        eprintln!("[debug-stem] {}: combined_rms={:.6}", stem_id.as_str(), combined_rms);
-    }
 
     Ok(Stem {
         id: stem_id,

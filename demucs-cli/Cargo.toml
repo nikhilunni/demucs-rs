@@ -8,10 +8,11 @@ name = "demucs"
 path = "src/main.rs"
 
 [features]
-default = ["wgpu"]
+default = ["wgpu", "autotune"]
 wgpu = ["demucs-core/wgpu", "burn/wgpu"]
 cuda = ["demucs-core/cuda", "burn/cuda"]
 cpu = ["demucs-core/ndarray", "burn/ndarray"]
+autotune = ["demucs-core/autotune"]
 
 [dependencies]
 demucs-core = { path = "../demucs-core" }
@@ -21,3 +22,4 @@ hound = "3"
 ureq = "2"
 indicatif = "0.17"
 anyhow = "1"
+pollster = "0.4"

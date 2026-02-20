@@ -152,7 +152,7 @@ fn main() -> Result<()> {
     // 6. Run separation
     eprintln!("Separating...");
     let stems = if cli.debug {
-        model.separate_with_listener(&left, &right, sample_rate, &mut DebugListener)?
+        pollster::block_on(model.separate_with_listener(&left, &right, sample_rate, &mut DebugListener))?
     } else {
         let n_models = if info.id == HTDEMUCS_FT_ID {
             selected.len()
@@ -160,7 +160,7 @@ fn main() -> Result<()> {
             1
         };
         let mut listener = CliListener::new(n_models);
-        model.separate_with_listener(&left, &right, sample_rate, &mut listener)?
+        pollster::block_on(model.separate_with_listener(&left, &right, sample_rate, &mut listener))?
     };
 
     // 7. Write output stems

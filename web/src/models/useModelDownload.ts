@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getModels, modelUrl } from "./registry";
 import { cacheModel, isCached } from "./modelCache";
-import { validate_model_weights } from "../wasm/demucs_wasm.js";
+import initWasm, { validate_model_weights } from "../wasm/demucs_wasm.js";
 
 export type DownloadState =
   | { status: "checking" }
@@ -78,6 +78,7 @@ export function useModelDownload(modelId: string): {
         }
 
         // Validate safetensors structure before caching
+        await initWasm();
         const validation = validate_model_weights(buf, modelId);
         if (!validation.valid) {
           throw new Error(`Invalid model weights: ${validation.error}`);

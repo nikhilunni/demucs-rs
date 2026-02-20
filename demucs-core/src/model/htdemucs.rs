@@ -151,12 +151,7 @@ impl<B: Backend> HTDemucs<B> {
         let (mut freq, freq_mean, freq_std) = Self::normalize_freq(freq);
         let (mut time, time_mean, time_std) = Self::normalize_time(time);
 
-        listener.on_event(ForwardEvent::Normalized {
-            freq_mean: Self::scalar_4d(&freq_mean),
-            freq_std: Self::scalar_4d(&freq_std),
-            time_mean: Self::scalar_3d(&time_mean),
-            time_std: Self::scalar_3d(&time_std),
-        });
+        listener.on_event(ForwardEvent::Normalized);
 
         // Report normalized CaC stats (input to freq encoder[0])
         listener.on_event(ForwardEvent::NormalizedCac {
@@ -276,39 +271,12 @@ impl<B: Backend> HTDemucs<B> {
         // 7. Denormalize outputs
         // Python uses raw std (not std + eps) for denormalization, matching the
         // trained behavior even though it's not a perfect inverse of normalization.
-        {
-            // Debug: pre-denorm stats
-            let f_data: Vec<f32> = freq.to_data().to_vec::<f32>().unwrap_or_default();
-            let f_rms = (f_data.iter().map(|x| x * x).sum::<f32>() / f_data.len().max(1) as f32).sqrt();
-            let t_data: Vec<f32> = time.to_data().to_vec::<f32>().unwrap_or_default();
-            let t_rms = (t_data.iter().map(|x| x * x).sum::<f32>() / t_data.len().max(1) as f32).sqrt();
-            eprintln!("[debug-denorm] pre:  freq_rms={:.6} time_rms={:.6}", f_rms, t_rms);
-            eprintln!("[debug-denorm] freq_mean={:.8} freq_std={:.8} time_mean={:.8} time_std={:.8}",
-                Self::scalar_4d(&freq_mean), Self::scalar_4d(&freq_std),
-                Self::scalar_3d(&time_mean), Self::scalar_3d(&time_std));
-        }
-        let freq = freq * freq_std.clone() + freq_mean;
-        let time = time * time_std.clone() + time_mean;
-        {
-            // Debug: post-denorm stats
-            let f_data: Vec<f32> = freq.to_data().to_vec::<f32>().unwrap_or_default();
-            let f_rms = (f_data.iter().map(|x| x * x).sum::<f32>() / f_data.len().max(1) as f32).sqrt();
-            let t_data: Vec<f32> = time.to_data().to_vec::<f32>().unwrap_or_default();
-            let t_rms = (t_data.iter().map(|x| x * x).sum::<f32>() / t_data.len().max(1) as f32).sqrt();
-            eprintln!("[debug-denorm] post: freq_rms={:.6} time_rms={:.6}", f_rms, t_rms);
-        }
+        let freq = freq * freq_std + freq_mean;
+        let time = time * time_std + time_mean;
 
         listener.on_event(ForwardEvent::Denormalized);
 
         Ok((freq, time))
-    }
-
-    fn scalar_4d(t: &Tensor<B, 4>) -> f32 {
-        t.to_data().to_vec::<f32>().expect("scalar extraction")[0]
-    }
-
-    fn scalar_3d(t: &Tensor<B, 3>) -> f32 {
-        t.to_data().to_vec::<f32>().expect("scalar extraction")[0]
     }
 
     fn normalize_freq(freq: Tensor<B, 4>) -> (Tensor<B, 4>, Tensor<B, 4>, Tensor<B, 4>) {

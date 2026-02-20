@@ -31,7 +31,7 @@ self.onmessage = async (e: MessageEvent) => {
 
       case "separate": {
         await wasmReady;
-        const result = separate(
+        const result = await separate(
           data.modelBytes,
           data.modelId,
           data.stems,

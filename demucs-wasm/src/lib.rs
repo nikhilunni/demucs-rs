@@ -4,7 +4,8 @@ use demucs_core::dsp::stft::Stft;
 use demucs_core::model::metadata::{self, ALL_MODELS, StemId, HTDEMUCS_ID, HTDEMUCS_6S_ID, HTDEMUCS_FT_ID};
 use demucs_core::weights::tensor_store;
 use demucs_core::{Demucs, ModelOptions};
-use burn::backend::wgpu::Wgpu;
+use burn::backend::wgpu::{Wgpu, RuntimeOptions, WgpuDevice, init_setup_async};
+use burn::backend::wgpu::graphics::WebGpu;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -224,7 +225,7 @@ fn parse_stem_id(s: &str) -> Option<StemId> {
 ///
 /// Returns a `SeparationResult` with flat buffer: per stem, L then R channel.
 #[wasm_bindgen]
-pub fn separate(
+pub async fn separate(
     model_bytes: &[u8],
     model_id: &str,
     selected_stems: JsValue,
@@ -250,11 +251,14 @@ pub fn separate(
         _ => return Err(JsError::new(&format!("Unknown model: {}", model_id))),
     };
 
-    let device = Default::default();
+    // WebGPU device must be initialized asynchronously on WASM
+    let device = WgpuDevice::default();
+    init_setup_async::<WebGpu>(&device, RuntimeOptions::default()).await;
+
     let model = Demucs::<B>::from_bytes(opts, model_bytes, device)
         .map_err(|e| JsError::new(&format!("Failed to load model: {}", e)))?;
 
-    let stems = model.separate(left, right, sample_rate)
+    let stems = model.separate(left, right, sample_rate).await
         .map_err(|e| JsError::new(&format!("Separation failed: {}", e)))?;
     let n_samples = left.len() as u32;
 
