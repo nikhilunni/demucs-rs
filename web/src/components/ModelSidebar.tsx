@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { MODELS, type ModelVariant, type StemId, type SelectedModel } from "../models/registry";
+import { getModels, type ModelVariant, type StemId, type SelectedModel } from "../models/registry";
 import { useModelDownload, type DownloadState } from "../models/useModelDownload";
 import { ProgressBar } from "./ProgressBar";
 

@@ -1,8 +1,13 @@
 use demucs_core::dsp::stft::Stft;
+use demucs_core::model::metadata::{self, ALL_MODELS};
+use demucs_core::weights::tensor_store;
+use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 const N_FFT: usize = 4096;
 const HOP_LENGTH: usize = 1024;
+
+// ─── Spectrogram API ────────────────────────────────────────────────────────
 
 /// Result of computing a spectrogram from audio samples.
 ///
@@ -60,5 +65,86 @@ pub fn compute_spectrogram(samples: &[f32]) -> SpectrogramResult {
         mags,
         num_frames: num_frames as u32,
         num_bins: num_bins as u32,
+    }
+}
+
+// ─── Model Registry API ─────────────────────────────────────────────────────
+
+/// JS-friendly model info for serialization across the WASM boundary.
+#[derive(Serialize)]
+struct JsModelInfo {
+    id: String,
+    label: String,
+    description: String,
+    size_mb: u32,
+    stems: Vec<String>,
+    filename: String,
+    download_url: String,
+}
+
+fn to_js_model(info: &metadata::ModelInfo) -> JsModelInfo {
+    JsModelInfo {
+        id: info.id.to_string(),
+        label: info.label.to_string(),
+        description: info.description.to_string(),
+        size_mb: info.size_mb,
+        stems: info.stems.iter().map(|s| s.as_str().to_string()).collect(),
+        filename: info.filename.to_string(),
+        download_url: metadata::download_url(info),
+    }
+}
+
+/// Returns the model registry as a JS array of model info objects.
+///
+/// Each object has: id, label, description, size_mb, stems, filename, download_url
+#[wasm_bindgen]
+pub fn get_model_registry() -> JsValue {
+    let models: Vec<JsModelInfo> = ALL_MODELS.iter().map(|m| to_js_model(m)).collect();
+    serde_wasm_bindgen::to_value(&models).unwrap()
+}
+
+// ─── Weight Validation API ──────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct ValidationResult {
+    valid: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tensor_counts: Option<Vec<usize>>,
+}
+
+/// Validate safetensors model weights.
+///
+/// Parses the safetensors header (fast — doesn't read tensor data) and checks
+/// that all expected signature prefixes are present. Returns a JS object:
+/// `{ valid: true, tensor_counts: [533] }` or `{ valid: false, error: "..." }`
+#[wasm_bindgen]
+pub fn validate_model_weights(bytes: &[u8], model_id: &str) -> JsValue {
+    let info = match ALL_MODELS.iter().find(|m| m.id == model_id) {
+        Some(i) => i,
+        None => {
+            return serde_wasm_bindgen::to_value(&ValidationResult {
+                valid: false,
+                error: Some(format!("Unknown model: {}", model_id)),
+                tensor_counts: None,
+            })
+            .unwrap();
+        }
+    };
+
+    match tensor_store::validate_signatures(bytes, info.signatures) {
+        Ok(counts) => serde_wasm_bindgen::to_value(&ValidationResult {
+            valid: true,
+            error: None,
+            tensor_counts: Some(counts),
+        })
+        .unwrap(),
+        Err(e) => serde_wasm_bindgen::to_value(&ValidationResult {
+            valid: false,
+            error: Some(e.to_string()),
+            tensor_counts: None,
+        })
+        .unwrap(),
     }
 }

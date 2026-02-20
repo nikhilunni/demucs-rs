@@ -6,6 +6,12 @@ edition = "2021"
 [dependencies]
 realfft = "3.5.0"
 burn = { version = "0.20.1", features = ["autotune"] }
+safetensors = "0.5"
+half = "2"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+dirs = "5"
 
 [dev-dependencies]
 burn = { version = "0.20.1", features = ["ndarray"] }
+safetensors = "0.5"

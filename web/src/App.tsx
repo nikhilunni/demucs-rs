@@ -6,12 +6,16 @@ import { SpectrogramView } from "./components/SpectrogramView";
 import { PlayerControls } from "./components/PlayerControls";
 import { useAudioPlayer } from "./hooks/useAudioPlayer";
 import { renderSpectrogramImage } from "./dsp/colormap";
-import initWasm, { compute_spectrogram } from "./wasm/demucs_wasm.js";
+import initWasm, { compute_spectrogram, get_model_registry } from "./wasm/demucs_wasm.js";
 import wasmUrl from "./wasm/demucs_wasm_bg.wasm?url";
+import { initRegistry } from "./models/registry";
 import "./App.css";
 
-// Start loading WASM immediately on module import
-const wasmReady = initWasm(wasmUrl);
+// Start loading WASM immediately on module import;
+// populate the model registry as soon as it's ready.
+const wasmReady = initWasm(wasmUrl).then(() => {
+  initRegistry(get_model_registry());
+});
 
 type Phase =
   | { kind: "idle" }
