@@ -12,11 +12,11 @@ pub struct FsProvider {
 }
 
 impl FsProvider {
-    pub fn new() -> Self {
-        let base = dirs::cache_dir().expect("could not determine cache directory");
-        Self {
+    pub fn new() -> Result<Self, ProviderError> {
+        let base = dirs::cache_dir().ok_or(ProviderError::NoCacheDir)?;
+        Ok(Self {
             cache_dir: base.join("demucs-rs"),
-        }
+        })
     }
 
     pub fn with_dir(cache_dir: PathBuf) -> Self {

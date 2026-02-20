@@ -1,5 +1,5 @@
 use burn::module::Param;
-use burn::nn::conv::{Conv1d, ConvTranspose1d};
+use burn::nn::conv::{Conv1d, Conv2d, ConvTranspose1d, ConvTranspose2d};
 use burn::nn::{Embedding, GroupNorm, LayerNorm, Linear};
 use burn::prelude::Backend;
 use burn::tensor::Tensor;
@@ -35,6 +35,24 @@ fn load_conv1d<B: Backend>(
     Ok(())
 }
 
+fn load_conv2d<B: Backend>(
+    conv: &mut Conv2d<B>,
+    store: &mut TensorStore,
+    prefix: &str,
+    device: &B::Device,
+) -> Result<(), WeightError> {
+    let w = store.take(&format!("{}.weight", prefix))?;
+    // 4D weight [out, in, kH, kW] — no transformation needed
+    conv.weight = Param::from_tensor(Tensor::from_data(to_tensor_data(w), device));
+    if let Ok(b) = store.take(&format!("{}.bias", prefix)) {
+        conv.bias = Some(Param::from_tensor(Tensor::from_data(
+            to_tensor_data(b),
+            device,
+        )));
+    }
+    Ok(())
+}
+
 fn load_conv_tr1d<B: Backend>(
     conv: &mut ConvTranspose1d<B>,
     store: &mut TensorStore,
@@ -42,6 +60,24 @@ fn load_conv_tr1d<B: Backend>(
     device: &B::Device,
 ) -> Result<(), WeightError> {
     let w = store.take(&format!("{}.weight", prefix))?;
+    conv.weight = Param::from_tensor(Tensor::from_data(to_tensor_data(w), device));
+    if let Ok(b) = store.take(&format!("{}.bias", prefix)) {
+        conv.bias = Some(Param::from_tensor(Tensor::from_data(
+            to_tensor_data(b),
+            device,
+        )));
+    }
+    Ok(())
+}
+
+fn load_conv_tr2d<B: Backend>(
+    conv: &mut ConvTranspose2d<B>,
+    store: &mut TensorStore,
+    prefix: &str,
+    device: &B::Device,
+) -> Result<(), WeightError> {
+    let w = store.take(&format!("{}.weight", prefix))?;
+    // 4D weight [in, out, kH, kW] — no transformation needed
     conv.weight = Param::from_tensor(Tensor::from_data(to_tensor_data(w), device));
     if let Ok(b) = store.take(&format!("{}.bias", prefix)) {
         conv.bias = Some(Param::from_tensor(Tensor::from_data(
@@ -170,14 +206,14 @@ fn load_henc_layer<B: Backend>(
     prefix: &str,
     device: &B::Device,
 ) -> Result<(), WeightError> {
-    load_conv1d(&mut enc.conv, store, &format!("{}.conv", prefix), device)?;
+    load_conv2d(&mut enc.conv, store, &format!("{}.conv", prefix), device)?;
     load_dconv(
         &mut enc.dconv,
         store,
         &format!("{}.dconv.layers", prefix),
         device,
     )?;
-    load_conv1d(
+    load_conv2d(
         &mut enc.rewrite,
         store,
         &format!("{}.rewrite", prefix),
@@ -214,7 +250,7 @@ fn load_hdec_layer<B: Backend>(
     prefix: &str,
     device: &B::Device,
 ) -> Result<(), WeightError> {
-    load_conv1d(
+    load_conv2d(
         &mut dec.rewrite,
         store,
         &format!("{}.rewrite", prefix),
@@ -226,7 +262,7 @@ fn load_hdec_layer<B: Backend>(
         &format!("{}.dconv.layers", prefix),
         device,
     )?;
-    load_conv_tr1d(
+    load_conv_tr2d(
         &mut dec.conv_tr,
         store,
         &format!("{}.conv_tr", prefix),
@@ -284,9 +320,15 @@ fn load_mha<B: Backend>(
     let mut w_chunks = split_dim0(&in_proj_w, 3)?;
     // w_chunks: [Q, K, V] each [d, d] in PyTorch layout
     // Burn Linear stores [in, out], so transpose each
-    let v_w = transpose_2d(w_chunks.pop().unwrap())?;
-    let k_w = transpose_2d(w_chunks.pop().unwrap())?;
-    let q_w = transpose_2d(w_chunks.pop().unwrap())?;
+    let v_w = transpose_2d(w_chunks.pop().ok_or_else(|| {
+        WeightError::ShapeMismatch("in_proj_weight split: missing V chunk".into())
+    })?)?;
+    let k_w = transpose_2d(w_chunks.pop().ok_or_else(|| {
+        WeightError::ShapeMismatch("in_proj_weight split: missing K chunk".into())
+    })?)?;
+    let q_w = transpose_2d(w_chunks.pop().ok_or_else(|| {
+        WeightError::ShapeMismatch("in_proj_weight split: missing Q chunk".into())
+    })?)?;
 
     attn.query.weight = Param::from_tensor(Tensor::from_data(to_tensor_data(q_w), device));
     attn.key.weight = Param::from_tensor(Tensor::from_data(to_tensor_data(k_w), device));
@@ -295,9 +337,15 @@ fn load_mha<B: Backend>(
     // 2. Split in_proj_bias [3*d] → Q, K, V each [d]
     let in_proj_b = store.take(&format!("{}.in_proj_bias", prefix))?;
     let mut b_chunks = split_1d(&in_proj_b, 3)?;
-    let v_b = b_chunks.pop().unwrap();
-    let k_b = b_chunks.pop().unwrap();
-    let q_b = b_chunks.pop().unwrap();
+    let v_b = b_chunks.pop().ok_or_else(|| {
+        WeightError::ShapeMismatch("in_proj_bias split: missing V chunk".into())
+    })?;
+    let k_b = b_chunks.pop().ok_or_else(|| {
+        WeightError::ShapeMismatch("in_proj_bias split: missing K chunk".into())
+    })?;
+    let q_b = b_chunks.pop().ok_or_else(|| {
+        WeightError::ShapeMismatch("in_proj_bias split: missing Q chunk".into())
+    })?;
 
     attn.query.bias = Some(Param::from_tensor(Tensor::from_data(
         to_tensor_data(q_b),
@@ -374,7 +422,10 @@ fn load_self_attn_layer<B: Backend>(
         device,
     )?;
     if let Some(ref mut norm_out) = layer.norm_out {
-        load_layernorm(norm_out, store, &format!("{}.norm_out", prefix), device)?;
+        load_groupnorm(norm_out, store, &format!("{}.norm_out", prefix), device)?;
+    } else {
+        // Skip norm_out keys if present in file but not in model
+        store.skip_prefix(&format!("{}.norm_out", prefix));
     }
     Ok(())
 }
@@ -435,7 +486,10 @@ fn load_cross_attn_layer<B: Backend>(
         device,
     )?;
     if let Some(ref mut norm_out) = layer.norm_out {
-        load_layernorm(norm_out, store, &format!("{}.norm_out", prefix), device)?;
+        load_groupnorm(norm_out, store, &format!("{}.norm_out", prefix), device)?;
+    } else {
+        // Skip norm_out keys if present in file but not in model
+        store.skip_prefix(&format!("{}.norm_out", prefix));
     }
     Ok(())
 }
@@ -473,8 +527,7 @@ fn load_cross_domain_transformer<B: Backend>(
         load_conv1d(down, store, "channel_downsampler_t", device)?;
     }
 
-    // Freq embedding
-    load_embedding(&mut ct.freq_emb, store, "freq_emb.embedding", device)?;
+    // freq_emb is loaded at model level, not here
 
     // Input norms
     load_layernorm(&mut ct.norm_in, store, "crosstransformer.norm_in", device)?;
@@ -532,6 +585,13 @@ fn load_htdemucs_from_store<B: Backend>(
         load_tdec_layer(dec, store, &format!("tdecoder.{}", i), device)?;
     }
 
+    // Freq embedding (at model level, not in transformer)
+    // ScaledEmbedding stores raw weights; forward() multiplies by scale (10).
+    // Bake in the scale here so forward just does a simple lookup.
+    // The 0.2 freq_emb_scale is applied separately in HTDemucs::forward_with_listener.
+    load_embedding(&mut model.freq_emb, store, "freq_emb.embedding", device)?;
+    model.freq_emb.weight = Param::from_tensor(model.freq_emb.weight.val() * 10.0);
+
     // Cross-domain transformer (keys are at root level, not under a prefix)
     load_cross_domain_transformer(&mut model.crosstransformer, store, device)?;
 
@@ -557,7 +617,7 @@ pub fn load_model<B: Backend>(
             return Err(WeightError::ShapeMismatch(format!(
                 "unused keys for signature {}: {:?}",
                 sig,
-                remaining.iter().take(10).collect::<Vec<_>>()
+                remaining.iter().take(50).collect::<Vec<_>>()
             )));
         }
 

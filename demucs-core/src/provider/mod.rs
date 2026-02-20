@@ -9,6 +9,7 @@ pub mod fs;
 pub enum ProviderError {
     NotCached(String),
     IoError(std::io::Error),
+    NoCacheDir,
 }
 
 impl fmt::Display for ProviderError {
@@ -16,6 +17,7 @@ impl fmt::Display for ProviderError {
         match self {
             ProviderError::NotCached(name) => write!(f, "model not cached: {}", name),
             ProviderError::IoError(e) => write!(f, "io error: {}", e),
+            ProviderError::NoCacheDir => write!(f, "could not determine system cache directory"),
         }
     }
 }

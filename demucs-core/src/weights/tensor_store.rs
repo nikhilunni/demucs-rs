@@ -93,6 +93,12 @@ impl TensorStore {
         self.tensors.len()
     }
 
+    /// Remove and discard all keys that start with `prefix`.
+    /// Used to skip weights we intentionally don't load (e.g. decoder DConv).
+    pub fn skip_prefix(&mut self, prefix: &str) {
+        self.tensors.retain(|k, _| !k.starts_with(prefix));
+    }
+
     /// List remaining unused keys (for sanity checks after loading).
     pub fn remaining_keys(&self) -> Vec<&str> {
         let mut keys: Vec<&str> = self.tensors.keys().map(|s| s.as_str()).collect();

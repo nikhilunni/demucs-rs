@@ -1,0 +1,110 @@
+import { useCallback, useEffect, useMemo, useRef } from "react";
+
+export interface SpectrogramResult {
+  mags: Float32Array;
+  numFrames: number;
+  numBins: number;
+}
+
+export interface SeparateResult {
+  audio: Float32Array;
+  stemNames: string[];
+  nSamples: number;
+  numStems: number;
+}
+
+export interface SeparateOptions {
+  modelBytes: Uint8Array;
+  modelId: string;
+  stems: string[];
+  left: Float32Array;
+  right: Float32Array;
+  sampleRate: number;
+}
+
+export interface DemucsWorker {
+  init(wasmUrl: string): Promise<{ registry: any }>;
+  spectrogram(samples: Float32Array): Promise<SpectrogramResult>;
+  separate(opts: SeparateOptions): Promise<SeparateResult>;
+}
+
+/**
+ * React hook that manages a Web Worker running WASM inference.
+ * Provides a promise-based API for spectrogram computation and source separation.
+ */
+export function useDemucsWorker(): DemucsWorker {
+  const workerRef = useRef<Worker | null>(null);
+  const pendingRef = useRef(
+    new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>(),
+  );
+  const idRef = useRef(0);
+
+  useEffect(() => {
+    const worker = new Worker(
+      new URL("../worker.ts", import.meta.url),
+      { type: "module" },
+    );
+    workerRef.current = worker;
+
+    worker.onmessage = (e: MessageEvent) => {
+      const { id, type, ...data } = e.data;
+      const pending = pendingRef.current.get(id);
+      if (!pending) return;
+      pendingRef.current.delete(id);
+
+      if (type === "error") {
+        pending.reject(new Error(data.error));
+      } else {
+        pending.resolve(data);
+      }
+    };
+
+    return () => {
+      worker.terminate();
+      workerRef.current = null;
+      // Reject any pending requests
+      for (const [, p] of pendingRef.current) {
+        p.reject(new Error("Worker terminated"));
+      }
+      pendingRef.current.clear();
+    };
+  }, []);
+
+  const send = useCallback(
+    (type: string, data: Record<string, any>, transfer: Transferable[] = []) => {
+      return new Promise<any>((resolve, reject) => {
+        const worker = workerRef.current;
+        if (!worker) {
+          reject(new Error("Worker not ready"));
+          return;
+        }
+        const id = idRef.current++;
+        pendingRef.current.set(id, { resolve, reject });
+        worker.postMessage({ type, id, ...data }, transfer);
+      });
+    },
+    [],
+  );
+
+  const init = useCallback(
+    (wasmUrl: string) => send("init", { wasmUrl }),
+    [send],
+  );
+
+  const spectrogram = useCallback(
+    (samples: Float32Array) =>
+      send("spectrogram", { samples }, [samples.buffer]),
+    [send],
+  );
+
+  const separate = useCallback(
+    (opts: SeparateOptions) =>
+      send("separate", opts, [opts.modelBytes.buffer]),
+    [send],
+  );
+
+  return useMemo(
+    () => ({ init, spectrogram, separate }),
+    [init, spectrogram, separate],
+  );
+}

@@ -7,9 +7,10 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-demucs-core = { path = "../demucs-core", features = ["ndarray"] }
-burn = { version = "0.20.1", features = ["ndarray"] }
+demucs-core = { path = "../demucs-core", features = ["wgpu"] }
+burn = { version = "0.20.1", features = ["wgpu"] }
 wasm-bindgen = "0.2"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
+console_error_panic_hook = "0.1"

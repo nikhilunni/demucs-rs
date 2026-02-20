@@ -1,15 +1,26 @@
+use std::sync::Once;
+
 use demucs_core::dsp::stft::Stft;
 use demucs_core::model::metadata::{self, ALL_MODELS, StemId, HTDEMUCS_ID, HTDEMUCS_6S_ID, HTDEMUCS_FT_ID};
 use demucs_core::weights::tensor_store;
 use demucs_core::{Demucs, ModelOptions};
-use burn::backend::NdArray;
+use burn::backend::wgpu::Wgpu;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
-type B = NdArray<f32>;
+type B = Wgpu;
 
 const N_FFT: usize = 4096;
 const HOP_LENGTH: usize = 1024;
+
+static PANIC_HOOK: Once = Once::new();
+
+/// Install panic hook so Rust panics show real messages in the browser console.
+fn ensure_panic_hook() {
+    PANIC_HOOK.call_once(|| {
+        console_error_panic_hook::set_once();
+    });
+}
 
 // ─── Spectrogram API ────────────────────────────────────────────────────────
 
@@ -50,11 +61,12 @@ impl SpectrogramResult {
 /// Accepts a `Float32Array` of samples (typically from `AudioBuffer.getChannelData`).
 /// Uses `n_fft = 4096` and `hop_length = 1024` to match HTDemucs.
 #[wasm_bindgen]
-pub fn compute_spectrogram(samples: &[f32]) -> SpectrogramResult {
+pub fn compute_spectrogram(samples: &[f32]) -> Result<SpectrogramResult, JsError> {
     let num_bins = N_FFT / 2 + 1;
 
     let mut stft = Stft::new(N_FFT, HOP_LENGTH);
-    let complex = stft.forward(samples);
+    let complex = stft.forward(samples)
+        .map_err(|e| JsError::new(&format!("{}", e)))?;
     let num_frames = complex.len() / num_bins;
 
     let mags: Vec<f32> = complex
@@ -65,11 +77,11 @@ pub fn compute_spectrogram(samples: &[f32]) -> SpectrogramResult {
         })
         .collect();
 
-    SpectrogramResult {
+    Ok(SpectrogramResult {
         mags,
         num_frames: num_frames as u32,
         num_bins: num_bins as u32,
-    }
+    })
 }
 
 // ─── Model Registry API ─────────────────────────────────────────────────────
@@ -102,9 +114,10 @@ fn to_js_model(info: &metadata::ModelInfo) -> JsModelInfo {
 ///
 /// Each object has: id, label, description, size_mb, stems, filename, download_url
 #[wasm_bindgen]
-pub fn get_model_registry() -> JsValue {
+pub fn get_model_registry() -> Result<JsValue, JsError> {
     let models: Vec<JsModelInfo> = ALL_MODELS.iter().map(|m| to_js_model(m)).collect();
-    serde_wasm_bindgen::to_value(&models).unwrap()
+    serde_wasm_bindgen::to_value(&models)
+        .map_err(|e| JsError::new(&format!("serialization failed: {}", e)))
 }
 
 // ─── Weight Validation API ──────────────────────────────────────────────────
@@ -124,7 +137,7 @@ struct ValidationResult {
 /// that all expected signature prefixes are present. Returns a JS object:
 /// `{ valid: true, tensor_counts: [533] }` or `{ valid: false, error: "..." }`
 #[wasm_bindgen]
-pub fn validate_model_weights(bytes: &[u8], model_id: &str) -> JsValue {
+pub fn validate_model_weights(bytes: &[u8], model_id: &str) -> Result<JsValue, JsError> {
     let info = match ALL_MODELS.iter().find(|m| m.id == model_id) {
         Some(i) => i,
         None => {
@@ -133,24 +146,25 @@ pub fn validate_model_weights(bytes: &[u8], model_id: &str) -> JsValue {
                 error: Some(format!("Unknown model: {}", model_id)),
                 tensor_counts: None,
             })
-            .unwrap();
+            .map_err(|e| JsError::new(&format!("serialization failed: {}", e)));
         }
     };
 
-    match tensor_store::validate_signatures(bytes, info.signatures) {
-        Ok(counts) => serde_wasm_bindgen::to_value(&ValidationResult {
+    let result = match tensor_store::validate_signatures(bytes, info.signatures) {
+        Ok(counts) => ValidationResult {
             valid: true,
             error: None,
             tensor_counts: Some(counts),
-        })
-        .unwrap(),
-        Err(e) => serde_wasm_bindgen::to_value(&ValidationResult {
+        },
+        Err(e) => ValidationResult {
             valid: false,
             error: Some(e.to_string()),
             tensor_counts: None,
-        })
-        .unwrap(),
-    }
+        },
+    };
+
+    serde_wasm_bindgen::to_value(&result)
+        .map_err(|e| JsError::new(&format!("serialization failed: {}", e)))
 }
 
 // ─── Separation API ────────────────────────────────────────────────────────
@@ -177,8 +191,9 @@ impl SeparationResult {
     }
 
     /// Returns stem names as a JS array of strings.
-    pub fn stem_names(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.stem_names).unwrap()
+    pub fn stem_names(&self) -> Result<JsValue, JsError> {
+        serde_wasm_bindgen::to_value(&self.stem_names)
+            .map_err(|e| JsError::new(&format!("serialization failed: {}", e)))
     }
 
     /// Move the audio buffer to JS, consuming this result.
@@ -205,6 +220,7 @@ fn parse_stem_id(s: &str) -> Option<StemId> {
 /// - `model_id`: e.g. "htdemucs", "htdemucs_6s", "htdemucs_ft"
 /// - `selected_stems`: JS string array of stem names to extract
 /// - `left`, `right`: stereo PCM samples
+/// - `sample_rate`: sample rate of the input audio (resampled internally if != 44100)
 ///
 /// Returns a `SeparationResult` with flat buffer: per stem, L then R channel.
 #[wasm_bindgen]
@@ -214,7 +230,10 @@ pub fn separate(
     selected_stems: JsValue,
     left: &[f32],
     right: &[f32],
+    sample_rate: u32,
 ) -> Result<SeparationResult, JsError> {
+    ensure_panic_hook();
+
     let stem_strs: Vec<String> = serde_wasm_bindgen::from_value(selected_stems)
         .map_err(|e| JsError::new(&format!("Invalid stems array: {}", e)))?;
 
@@ -235,7 +254,8 @@ pub fn separate(
     let model = Demucs::<B>::from_bytes(opts, model_bytes, device)
         .map_err(|e| JsError::new(&format!("Failed to load model: {}", e)))?;
 
-    let stems = model.separate(left, right);
+    let stems = model.separate(left, right, sample_rate)
+        .map_err(|e| JsError::new(&format!("Separation failed: {}", e)))?;
     let n_samples = left.len() as u32;
 
     // Build flat buffer and collect names

@@ -7,20 +7,14 @@ import { PlayerControls } from "./components/PlayerControls";
 import { StemResults, type StemData } from "./components/StemResults";
 import { useAudioPlayer } from "./hooks/useAudioPlayer";
 import { useMultiTrackPlayer, type StemTrack } from "./hooks/useMultiTrackPlayer";
+import { useDemucsWorker } from "./hooks/useDemucsWorker";
 import { renderSpectrogramImage } from "./dsp/colormap";
 import { encodeWavUrl } from "./dsp/wav";
 import { loadModel } from "./models/modelCache";
 import type { SelectedModel } from "./models/registry";
-import initWasm, { compute_spectrogram, get_model_registry, separate } from "./wasm/demucs_wasm.js";
-import wasmUrl from "./wasm/demucs_wasm_bg.wasm?url";
 import { initRegistry } from "./models/registry";
+import wasmUrl from "./wasm/demucs_wasm_bg.wasm?url";
 import "./App.css";
-
-// Start loading WASM immediately on module import;
-// populate the model registry as soon as it's ready.
-const wasmReady = initWasm(wasmUrl).then(() => {
-  initRegistry(get_model_registry());
-});
 
 /** Persistent info about the loaded track (survives phase transitions). */
 interface TrackInfo {
@@ -52,6 +46,17 @@ export default function App() {
   // Keep a ref to current stem blob URLs for cleanup
   const stemUrlsRef = useRef<string[]>([]);
 
+  // Worker for off-main-thread WASM execution
+  const worker = useDemucsWorker();
+  const initRef = useRef<Promise<void> | undefined>(undefined);
+
+  // Initialize WASM in the worker on mount
+  useEffect(() => {
+    initRef.current = worker.init(wasmUrl).then(({ registry }) => {
+      initRegistry(registry);
+    });
+  }, [worker]);
+
   const handleFile = useCallback(async (file: File) => {
     if (phase.kind === "loading") return;
 
@@ -69,7 +74,7 @@ export default function App() {
     await new Promise((r) => setTimeout(r, 60));
 
     try {
-      await wasmReady;
+      await initRef.current;
 
       const url = URL.createObjectURL(file);
 
@@ -90,10 +95,8 @@ export default function App() {
         mono[i] = (left[i] + right[i]) * 0.5;
       }
 
-      const result = compute_spectrogram(mono);
-      const numFrames = result.num_frames;
-      const numBins = result.num_bins;
-      const mags = result.take_mags();
+      // Compute spectrogram in worker (transfers mono buffer)
+      const { mags, numFrames, numBins } = await worker.spectrogram(mono);
       const image = renderSpectrogramImage({ mags, numFrames, numBins }, sr);
 
       setTrackInfo({
@@ -110,7 +113,7 @@ export default function App() {
       alert("Could not decode that file — is it a valid audio file?");
       setPhase({ kind: "idle" });
     }
-  }, [phase, trackInfo]);
+  }, [phase, trackInfo, worker]);
 
   const handleRun = useCallback(async (selection: SelectedModel) => {
     if (!trackInfo) return;
@@ -126,19 +129,15 @@ export default function App() {
       const modelBytes = new Uint8Array(bytes);
       const stemNames = selection.stems.map((s) => s as string);
 
-      // Run separation via WASM
-      const result = separate(
+      // Run separation in worker (transfers modelBytes buffer)
+      const { audio, stemNames: names, nSamples, numStems } = await worker.separate({
         modelBytes,
-        selection.variant.id,
-        stemNames,
-        trackInfo.left,
-        trackInfo.right,
-      );
-
-      const numStems = result.num_stems;
-      const nSamples = result.n_samples;
-      const names: string[] = result.stem_names();
-      const audio = result.take_audio();
+        modelId: selection.variant.id,
+        stems: stemNames,
+        left: trackInfo.left,
+        right: trackInfo.right,
+        sampleRate: trackInfo.sampleRate,
+      });
 
       // Build per-stem data
       const stems: StemData[] = [];
@@ -156,12 +155,12 @@ export default function App() {
           mono[j] = (stemLeft[j] + stemRight[j]) * 0.5;
         }
 
-        // Compute spectrogram for this stem
-        const spec = compute_spectrogram(mono);
-        const numFrames = spec.num_frames;
-        const numBins = spec.num_bins;
-        const mags = spec.take_mags();
-        const image = renderSpectrogramImage({ mags, numFrames, numBins }, trackInfo.sampleRate);
+        // Compute spectrogram for this stem in worker
+        const spec = await worker.spectrogram(mono);
+        const image = renderSpectrogramImage(
+          { mags: spec.mags, numFrames: spec.numFrames, numBins: spec.numBins },
+          trackInfo.sampleRate,
+        );
 
         // Encode WAV blob URL
         const wavUrl = encodeWavUrl(stemLeft, stemRight, trackInfo.sampleRate);
@@ -178,7 +177,7 @@ export default function App() {
       alert(`Separation failed: ${err instanceof Error ? err.message : err}`);
       setPhase({ kind: "ready" });
     }
-  }, [trackInfo]);
+  }, [trackInfo, worker]);
 
   const handleReset = useCallback(() => {
     if (trackInfo) {

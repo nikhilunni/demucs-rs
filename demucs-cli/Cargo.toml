@@ -1,0 +1,23 @@
+[package]
+name = "demucs-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "demucs"
+path = "src/main.rs"
+
+[features]
+default = ["wgpu"]
+wgpu = ["demucs-core/wgpu", "burn/wgpu"]
+cuda = ["demucs-core/cuda", "burn/cuda"]
+cpu = ["demucs-core/ndarray", "burn/ndarray"]
+
+[dependencies]
+demucs-core = { path = "../demucs-core" }
+burn = { version = "0.20.1" }
+clap = { version = "4", features = ["derive"] }
+hound = "3"
+ureq = "2"
+indicatif = "0.17"
+anyhow = "1"
