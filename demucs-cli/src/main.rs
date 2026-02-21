@@ -12,7 +12,7 @@ use demucs_core::model::metadata::{
 };
 use demucs_core::provider::fs::FsProvider;
 use demucs_core::provider::ModelProvider;
-use demucs_core::{Demucs, ModelOptions};
+use demucs_core::{Demucs, ModelOptions, num_chunks};
 
 use crate::progress::CliListener;
 
@@ -159,7 +159,14 @@ fn main() -> Result<()> {
         } else {
             1
         };
-        let mut listener = CliListener::new(n_models);
+        // Estimate samples at 44100 Hz to compute chunk count
+        let n_samples_44k = if sample_rate != 44100 {
+            (left.len() as f64 * 44100.0 / sample_rate as f64).ceil() as usize
+        } else {
+            left.len()
+        };
+        let chunks = num_chunks(n_samples_44k);
+        let mut listener = CliListener::new(n_models, chunks);
         pollster::block_on(model.separate_with_listener(&left, &right, sample_rate, &mut listener))?
     };
 

@@ -7,6 +7,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 /// + 8 decoder (4 freq + 4 time) + 1 denorm.
 pub struct CliListener {
     pb: ProgressBar,
+    num_chunks: usize,
 }
 
 impl CliListener {
@@ -14,17 +15,18 @@ impl CliListener {
     ///
     /// `n_models` is the number of model forward passes (1 for htdemucs/6s,
     /// up to 4 for htdemucs_ft depending on selected stems).
-    pub fn new(n_models: usize) -> Self {
-        let total_steps = n_models as u64 * 18;
+    /// `num_chunks` is the number of audio chunks (1 for short audio).
+    pub fn new(n_models: usize, num_chunks: usize) -> Self {
+        let total_steps = n_models as u64 * 18 * num_chunks as u64;
         let pb = ProgressBar::new(total_steps);
         pb.set_style(
             ProgressStyle::with_template(
-                "{spinner:.green} Separating [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
+                "{spinner:.green} Separating [{bar:40.cyan/blue}] {pos}/{len} ({eta}) {msg}",
             )
             .unwrap()
             .progress_chars("#>-"),
         );
-        Self { pb }
+        Self { pb, num_chunks }
     }
 }
 
@@ -37,8 +39,17 @@ impl ForwardListener for CliListener {
             | ForwardEvent::Denormalized => {
                 self.pb.inc(1);
             }
-            ForwardEvent::StemDone { index, total } => {
+            ForwardEvent::ChunkStarted { index, total } => {
+                self.pb.set_message(format!("chunk {}/{}", index + 1, total));
+            }
+            ForwardEvent::ChunkDone { index, total } => {
                 if index + 1 == total {
+                    self.pb.finish_with_message("done");
+                }
+            }
+            ForwardEvent::StemDone { index, total } => {
+                // Only finish on last stem if not chunked (single-segment path)
+                if self.num_chunks == 1 && index + 1 == total {
                     self.pb.finish_with_message("done");
                 }
             }

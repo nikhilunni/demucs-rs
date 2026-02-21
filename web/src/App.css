@@ -725,15 +725,358 @@ body {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   Separating Indicator
+   Model Progress — Architecture Visualization
    ══════════════════════════════════════════════════════════════ */
-.separating-indicator {
+.mp {
   display: flex;
   flex-direction: column;
+  gap: 14px;
+  padding: 20px 24px;
+  border-radius: var(--radius);
+  background:
+    radial-gradient(ellipse 120% 80% at 50% -20%, rgba(124, 111, 240, 0.07), transparent),
+    var(--surface);
+  border: 1px solid var(--border);
+  animation: fade-in 0.4s ease;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02),
+    0 8px 32px -8px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Chunk progress bar ─── */
+.mp-chunk {
+  display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 24px 0;
-  animation: fade-in 0.3s ease;
+  gap: 12px;
+}
+
+.mp-chunk__label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mp-chunk__bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.mp-chunk__fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent-cool), var(--accent));
+  transition: width 0.4s ease;
+  box-shadow: 0 0 12px rgba(124, 111, 240, 0.3);
+}
+
+/* ── Architecture diagram ─── */
+.mp-arch {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mp-arch__header {
+  display: flex;
+  padding: 0 0 0 80px;
+}
+
+.mp-arch__title {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+
+.mp-arch__title--freq {
+  flex: 1;
+  color: var(--accent-cool);
+  opacity: 0.8;
+}
+
+.mp-arch__title--time {
+  flex: 1;
+  padding-left: 16px;
+  color: var(--accent);
+  opacity: 0.8;
+}
+
+/* ── Sections (encoder / transformer / decoder) ─── */
+.mp-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mp-section__label {
+  width: 64px;
+  flex-shrink: 0;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-micro);
+  text-align: right;
+}
+
+.mp-section--xfmr {
+  padding: 2px 0;
+}
+
+/* Flow connectors between sections */
+.mp-section + .mp-section {
+  position: relative;
+}
+
+.mp-section + .mp-section::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: 80px;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(124, 111, 240, 0.12) 20%,
+    rgba(180, 130, 240, 0.12) 50%,
+    rgba(240, 122, 92, 0.12) 80%,
+    transparent
+  );
+}
+
+/* ── Tracks (side-by-side freq | time columns) ─── */
+.mp-tracks {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+}
+
+.mp-track {
+  flex: 1;
+  display: flex;
+  gap: 5px;
+}
+
+/* ── Nodes ─── */
+.mp-node {
+  position: relative;
+  flex: 1;
+  height: 28px;
+  border-radius: 6px;
+  transition: all 0.3s ease;
+}
+
+.mp-node__inner {
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition: all 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Done nodes flash briefly when completing */
+.mp-node--done .mp-node__inner {
+  animation: node-complete 0.5s ease-out;
+}
+
+@keyframes node-complete {
+  0% { transform: scale(1.12); filter: brightness(1.8); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+
+/* Pending state — visible outline */
+.mp-node--pending.mp-node--freq .mp-node__inner {
+  border-color: rgba(124, 111, 240, 0.18);
+  background: rgba(124, 111, 240, 0.04);
+}
+
+.mp-node--pending.mp-node--time .mp-node__inner {
+  border-color: rgba(240, 122, 92, 0.18);
+  background: rgba(240, 122, 92, 0.04);
+}
+
+/* Done state — solid fill with glow */
+.mp-node--done.mp-node--freq .mp-node__inner {
+  border-color: rgba(124, 111, 240, 0.5);
+  background: rgba(124, 111, 240, 0.18);
+  box-shadow: 0 0 8px rgba(124, 111, 240, 0.12);
+}
+
+.mp-node--done.mp-node--time .mp-node__inner {
+  border-color: rgba(240, 122, 92, 0.5);
+  background: rgba(240, 122, 92, 0.18);
+  box-shadow: 0 0 8px rgba(240, 122, 92, 0.12);
+}
+
+/* Active state — FREQ (glowing purple) */
+.mp-node--active.mp-node--freq .mp-node__inner {
+  border-color: var(--accent-cool);
+  background: linear-gradient(135deg, rgba(124, 111, 240, 0.25), rgba(124, 111, 240, 0.1));
+  box-shadow:
+    0 0 20px rgba(124, 111, 240, 0.3),
+    0 0 6px rgba(124, 111, 240, 0.5),
+    inset 0 0 14px rgba(124, 111, 240, 0.12);
+  animation: node-pulse-freq 1.8s ease-in-out infinite;
+}
+
+/* Active state — TIME (glowing orange) */
+.mp-node--active.mp-node--time .mp-node__inner {
+  border-color: var(--accent);
+  background: linear-gradient(135deg, rgba(240, 122, 92, 0.25), rgba(240, 122, 92, 0.1));
+  box-shadow:
+    0 0 20px rgba(240, 122, 92, 0.3),
+    0 0 6px rgba(240, 122, 92, 0.5),
+    inset 0 0 14px rgba(240, 122, 92, 0.12);
+  animation: node-pulse-time 1.8s ease-in-out infinite;
+}
+
+@keyframes node-pulse-freq {
+  0%, 100% {
+    box-shadow:
+      0 0 20px rgba(124, 111, 240, 0.3),
+      0 0 6px rgba(124, 111, 240, 0.5),
+      inset 0 0 14px rgba(124, 111, 240, 0.12);
+  }
+  50% {
+    box-shadow:
+      0 0 32px rgba(124, 111, 240, 0.5),
+      0 0 10px rgba(124, 111, 240, 0.7),
+      inset 0 0 20px rgba(124, 111, 240, 0.18);
+  }
+}
+
+@keyframes node-pulse-time {
+  0%, 100% {
+    box-shadow:
+      0 0 20px rgba(240, 122, 92, 0.3),
+      0 0 6px rgba(240, 122, 92, 0.5),
+      inset 0 0 14px rgba(240, 122, 92, 0.12);
+  }
+  50% {
+    box-shadow:
+      0 0 32px rgba(240, 122, 92, 0.5),
+      0 0 10px rgba(240, 122, 92, 0.7),
+      inset 0 0 20px rgba(240, 122, 92, 0.18);
+  }
+}
+
+/* ── Transformer node (spans full width) ─── */
+.mp-xfmr {
+  flex: 1;
+  display: flex;
+}
+
+.mp-node--xfmr {
+  flex: 1;
+  height: 34px;
+  border-radius: 8px;
+}
+
+.mp-node--xfmr .mp-node__label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  color: var(--text-micro);
+  z-index: 1;
+  pointer-events: none;
+  transition: color 0.3s ease;
+}
+
+.mp-node--xfmr.mp-node--active .mp-node__label,
+.mp-node--xfmr.mp-node--done .mp-node__label {
+  color: var(--text-dim);
+}
+
+/* Transformer pending */
+.mp-node--xfmr.mp-node--pending .mp-node__inner {
+  border-color: rgba(180, 130, 240, 0.15);
+  background: rgba(180, 130, 240, 0.03);
+}
+
+/* Transformer done */
+.mp-node--xfmr.mp-node--done .mp-node__inner {
+  border-color: rgba(180, 130, 240, 0.45);
+  background: linear-gradient(135deg, rgba(124, 111, 240, 0.15), rgba(240, 122, 92, 0.15));
+  box-shadow: 0 0 10px rgba(180, 130, 240, 0.1);
+}
+
+/* Transformer active — combined purple/orange glow */
+.mp-node--xfmr.mp-node--active .mp-node__inner {
+  border-color: rgba(180, 130, 240, 0.6);
+  background: linear-gradient(135deg, rgba(124, 111, 240, 0.18), rgba(240, 122, 92, 0.18));
+  box-shadow:
+    0 0 24px rgba(180, 130, 240, 0.25),
+    0 0 8px rgba(180, 130, 240, 0.4),
+    inset 0 0 16px rgba(180, 130, 240, 0.1);
+  animation: node-pulse-xfmr 1.8s ease-in-out infinite;
+}
+
+@keyframes node-pulse-xfmr {
+  0%, 100% {
+    box-shadow:
+      0 0 24px rgba(180, 130, 240, 0.25),
+      0 0 8px rgba(180, 130, 240, 0.4),
+      inset 0 0 16px rgba(180, 130, 240, 0.1);
+  }
+  50% {
+    box-shadow:
+      0 0 36px rgba(180, 130, 240, 0.4),
+      0 0 12px rgba(180, 130, 240, 0.6),
+      inset 0 0 22px rgba(180, 130, 240, 0.15);
+  }
+}
+
+/* ── Detail line ─── */
+.mp-detail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.mp-detail__stage {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+.mp-detail__count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-micro);
+}
+
+/* ── Overall progress bar ─── */
+.mp-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+
+.mp-bar__fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent-cool), var(--accent));
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 8px rgba(124, 111, 240, 0.4);
 }
 
 /* ══════════════════════════════════════════════════════════════

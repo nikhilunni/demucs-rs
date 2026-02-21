@@ -1,15 +1,23 @@
-.PHONY: wasm web dev clean
+.PHONY: wasm wasm-release web dev dev-release clean
 
-# Build the Rust STFT → WASM module into web/src/wasm/
+# Build WASM (debug — fast compile, slow runtime)
 wasm:
 	wasm-pack build demucs-wasm --target web --out-dir ../web/src/wasm
 
+# Build WASM (release — slow compile, fast runtime)
+wasm-release:
+	wasm-pack build demucs-wasm --release --target web --out-dir ../web/src/wasm
+
 # Install web dependencies (if needed) and build for production
-web: wasm
+web: wasm-release
 	cd web && pnpm install && pnpm exec vite build
 
-# Start Vite dev server (rebuilds WASM first)
+# Start Vite dev server (debug WASM — fast iteration)
 dev: wasm
+	cd web && pnpm install && pnpm exec vite
+
+# Start Vite dev server (release WASM — for performance testing)
+dev-release: wasm-release
 	cd web && pnpm install && pnpm exec vite
 
 # Remove build artifacts

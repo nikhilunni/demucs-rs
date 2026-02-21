@@ -52,7 +52,6 @@ impl<B: Backend> Demucs<B> {
         listener: &mut impl ForwardListener,
     ) -> Result<Vec<Stem>> {
         let info = self.opts.model_info();
-        let device = &self.device;
 
         // ── 0. Resample to 44100 Hz if needed ────────────────────────────────
         let needs_resample = sample_rate != SAMPLE_RATE as u32;
@@ -69,9 +68,106 @@ impl<B: Backend> Demucs<B> {
         let right_channel = &right_in;
         let n_samples = left_channel.len();
 
-        // ── 1. Pad audio to training segment length ──────────────────────────
-        // Python model.forward() pads to training_length BEFORE STFT.
-        let padded_len = valid_length(n_samples);
+        // ── 1. Short audio fast path (≤ TRAINING_LENGTH) ────────────────────
+        let mut stems = if n_samples <= TRAINING_LENGTH {
+            self.separate_single_segment(left_channel, right_channel, n_samples, info, listener).await?
+        } else {
+            // ── 2. Chunked inference for long audio ─────────────────────────
+            let segment = TRAINING_LENGTH;
+            let stride = segment * 3 / 4; // 75% of segment = 25% overlap
+            let num_chunks = (n_samples.saturating_sub(segment) + stride - 1) / stride + 1;
+            let n_stems = info.stems.len();
+
+            // Accumulators: per-stem left/right + weight
+            let mut out_left = vec![vec![0.0f32; n_samples]; n_stems];
+            let mut out_right = vec![vec![0.0f32; n_samples]; n_stems];
+            let mut sum_weight = vec![0.0f32; n_samples];
+
+            for chunk_idx in 0..num_chunks {
+                listener.on_event(ForwardEvent::ChunkStarted {
+                    index: chunk_idx,
+                    total: num_chunks,
+                });
+
+                let start = chunk_idx * stride;
+                let end = (start + segment).min(n_samples);
+                let chunk_len = end - start;
+
+                let left_chunk = &left_channel[start..end];
+                let right_chunk = &right_channel[start..end];
+
+                let chunk_stems = self
+                    .separate_single_segment(left_chunk, right_chunk, chunk_len, info, listener)
+                    .await?;
+
+                // Apply triangular window and accumulate
+                let window = triangular_window(chunk_len);
+                for (s, stem) in chunk_stems.iter().enumerate() {
+                    for i in 0..chunk_len {
+                        let w = window[i];
+                        out_left[s][start + i] += w * stem.left[i];
+                        out_right[s][start + i] += w * stem.right[i];
+                    }
+                }
+                for i in 0..chunk_len {
+                    sum_weight[start + i] += window[i];
+                }
+
+                listener.on_event(ForwardEvent::ChunkDone {
+                    index: chunk_idx,
+                    total: num_chunks,
+                });
+
+                if listener.is_cancelled() {
+                    return Err(DemucsError::Cancelled);
+                }
+            }
+
+            // Normalize by accumulated weight
+            let mut stems = Vec::with_capacity(n_stems);
+            for (s, &stem_id) in info.stems.iter().enumerate() {
+                for i in 0..n_samples {
+                    let w = sum_weight[i];
+                    if w > 0.0 {
+                        out_left[s][i] /= w;
+                        out_right[s][i] /= w;
+                    }
+                }
+                stems.push(Stem {
+                    id: stem_id,
+                    left: std::mem::take(&mut out_left[s]),
+                    right: std::mem::take(&mut out_right[s]),
+                });
+            }
+            stems
+        };
+
+        // ── 3. Resample outputs back to original rate if needed ──────────────
+        if needs_resample {
+            for stem in &mut stems {
+                stem.left = resample_channel(&stem.left, SAMPLE_RATE as u32, sample_rate)
+                    .map_err(DemucsError::Dsp)?;
+                stem.right = resample_channel(&stem.right, SAMPLE_RATE as u32, sample_rate)
+                    .map_err(DemucsError::Dsp)?;
+            }
+        }
+
+        Ok(stems)
+    }
+
+    /// Process a single segment (≤ TRAINING_LENGTH) through the full pipeline.
+    async fn separate_single_segment(
+        &self,
+        left_channel: &[f32],
+        right_channel: &[f32],
+        n_samples: usize,
+        info: &'static ModelInfo,
+        listener: &mut impl ForwardListener,
+    ) -> Result<Vec<Stem>> {
+        let device = &self.device;
+
+        // Pad to TRAINING_LENGTH
+        let padded_len = TRAINING_LENGTH;
         let mut left_padded = vec![0.0f32; padded_len];
         let mut right_padded = vec![0.0f32; padded_len];
         left_padded[..n_samples].copy_from_slice(left_channel);
@@ -79,24 +175,23 @@ impl<B: Backend> Demucs<B> {
 
         let mut stft = Stft::new(N_FFT, HOP_LENGTH);
 
-        // ── 2. STFT both channels ───────────────────────────────────────────
+        // STFT both channels
         let left_spec = stft.forward(&left_padded)?;
         let right_spec = stft.forward(&right_padded)?;
-        let bins = N_FFT / 2; // 2048 — Nyquist dropped by _spec-style STFT
+        let bins = N_FFT / 2;
         let n_frames = left_spec.len() / bins;
 
-        // ── 3. CaC: each [2, F, T], stack to [4, F, T], add batch → [1, 4, F, T]
+        // CaC: each [2, F, T], stack to [4, F, T], add batch → [1, 4, F, T]
         let left_cac = stft_to_cac::<B>(&left_spec, N_FFT, device);
         let right_cac = stft_to_cac::<B>(&right_spec, N_FFT, device);
-        let freq = Tensor::cat(vec![left_cac, right_cac], 0) // [4, N_FFT/2, n_frames]
-            .unsqueeze_dim::<4>(0); // [1, 4, N_FFT/2, n_frames]
+        let freq = Tensor::cat(vec![left_cac, right_cac], 0)
+            .unsqueeze_dim::<4>(0);
 
-        // Time tensor from padded audio (same padded_len as what STFT processed)
         let time = build_time_tensor::<B>(&left_padded, &right_padded, padded_len, device);
 
-        // ── 4. Run model(s) and extract per-stem outputs ────────────────────
+        // Run model(s) and extract per-stem outputs
         let total_stems = info.stems.len();
-        let mut stems = match &self.opts {
+        let stems = match &self.opts {
             ModelOptions::FourStem | ModelOptions::SixStem => {
                 let (freq_out, time_out) =
                     self.models[0].forward_with_listener(freq, time, listener)?;
@@ -132,16 +227,6 @@ impl<B: Backend> Demucs<B> {
             }
         };
 
-        // ── 5. Resample outputs back to original rate if needed ──────────────
-        if needs_resample {
-            for stem in &mut stems {
-                stem.left = resample_channel(&stem.left, SAMPLE_RATE as u32, sample_rate)
-                    .map_err(DemucsError::Dsp)?;
-                stem.right = resample_channel(&stem.right, SAMPLE_RATE as u32, sample_rate)
-                    .map_err(DemucsError::Dsp)?;
-            }
-        }
-
         Ok(stems)
     }
 }
@@ -170,19 +255,16 @@ pub struct Stem {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/// Return the padded input length for inference. The Python model always pads
-/// to TRAINING_LENGTH when `use_train_segment` is True (the default in eval
-/// mode). Inputs longer than TRAINING_LENGTH would need chunking (not yet
-/// implemented).
-fn valid_length(length: usize) -> usize {
-    assert!(
-        length <= TRAINING_LENGTH,
-        "Input length {} exceeds training segment length {}. \
-         Chunked inference is not yet implemented.",
-        length,
-        TRAINING_LENGTH
-    );
-    TRAINING_LENGTH
+/// Build a triangular (Bartlett) window of the given length.
+/// Ramps linearly from 0 at the edges to 1 at the center.
+fn triangular_window(length: usize) -> Vec<f32> {
+    if length <= 1 {
+        return vec![1.0; length];
+    }
+    let denom = (length - 1) as f32;
+    (0..length)
+        .map(|i| 1.0 - (2.0 * i as f32 / denom - 1.0).abs())
+        .collect()
 }
 
 /// Build the time-domain input tensor [1, 2, padded_time_t] from stereo audio.
@@ -277,6 +359,16 @@ async fn extract_single_stem<B: Backend>(
     })
 }
 
+/// Compute the number of chunks needed for a given sample count.
+pub fn num_chunks(n_samples: usize) -> usize {
+    if n_samples <= TRAINING_LENGTH {
+        return 1;
+    }
+    let segment = TRAINING_LENGTH;
+    let stride = segment * 3 / 4;
+    (n_samples.saturating_sub(segment) + stride - 1) / stride + 1
+}
+
 pub(crate) const AUDIO_CHANNELS: usize = 2;
 
 pub(crate) const N_FFT: usize = 4096;
@@ -297,4 +389,4 @@ pub(crate) const SAMPLE_RATE: usize = 44100;
 /// Training segment length in samples. All HTDemucs variants were trained with
 /// segment = 39/5 seconds → int(39/5 * 44100) = 343980. The model always pads
 /// its input to this length during inference (via `use_train_segment`).
-pub(crate) const TRAINING_LENGTH: usize = 343980;
+pub const TRAINING_LENGTH: usize = 343980;

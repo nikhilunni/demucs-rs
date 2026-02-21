@@ -1,6 +1,8 @@
 use std::sync::Once;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use demucs_core::dsp::stft::Stft;
+use demucs_core::listener::{ForwardEvent, ForwardListener};
 use demucs_core::model::metadata::{self, ALL_MODELS, StemId, HTDEMUCS_ID, HTDEMUCS_6S_ID, HTDEMUCS_FT_ID};
 use demucs_core::weights::tensor_store;
 use demucs_core::{Demucs, ModelOptions};
@@ -9,12 +11,126 @@ use burn::backend::wgpu::graphics::WebGpu;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
+fn perf_now() -> f64 {
+    js_sys::Date::now()
+}
+
+macro_rules! wasm_log {
+    ($($arg:tt)*) => {
+        web_sys::console::log_1(&format!($($arg)*).into());
+    };
+}
+
+// ─── Listeners ──────────────────────────────────────────────────────────────
+
+/// Listener that both logs timing AND calls a JS callback for progress events.
+struct ProgressListener {
+    last: f64,
+    callback: Option<js_sys::Function>,
+}
+
+impl ProgressListener {
+    fn new(callback: Option<js_sys::Function>) -> Self {
+        Self { last: perf_now(), callback }
+    }
+
+    fn lap(&mut self, label: &str) {
+        let now = perf_now();
+        wasm_log!("[wasm]   {}: {:.0}ms", label, now - self.last);
+        self.last = now;
+    }
+
+    fn emit(&self, obj: &js_sys::Object) {
+        if let Some(cb) = &self.callback {
+            cb.call1(&JsValue::NULL, obj).ok();
+        }
+    }
+}
+
+fn set_str(obj: &js_sys::Object, key: &str, val: &str) {
+    js_sys::Reflect::set(obj, &JsValue::from_str(key), &JsValue::from_str(val)).ok();
+}
+
+fn set_u32(obj: &js_sys::Object, key: &str, val: u32) {
+    js_sys::Reflect::set(obj, &JsValue::from_str(key), &JsValue::from_f64(val as f64)).ok();
+}
+
+impl ForwardListener for ProgressListener {
+    fn on_event(&mut self, event: ForwardEvent) {
+        match &event {
+            ForwardEvent::Normalized => self.lap("normalize"),
+            ForwardEvent::EncoderDone { domain, layer, num_layers, .. } => {
+                self.lap(&format!("{} encoder {}", domain, layer));
+                let obj = js_sys::Object::new();
+                set_str(&obj, "type", "encoder_done");
+                set_str(&obj, "domain", &domain.to_string());
+                set_u32(&obj, "layer", *layer as u32);
+                set_u32(&obj, "numLayers", *num_layers as u32);
+                self.emit(&obj);
+            }
+            ForwardEvent::FreqEmbApplied => self.lap("freq_emb"),
+            ForwardEvent::TransformerDone { .. } => {
+                self.lap("transformer");
+                let obj = js_sys::Object::new();
+                set_str(&obj, "type", "transformer_done");
+                self.emit(&obj);
+            }
+            ForwardEvent::DecoderDone { domain, layer, num_layers, .. } => {
+                self.lap(&format!("{} decoder {}", domain, layer));
+                let obj = js_sys::Object::new();
+                set_str(&obj, "type", "decoder_done");
+                set_str(&obj, "domain", &domain.to_string());
+                set_u32(&obj, "layer", *layer as u32);
+                set_u32(&obj, "numLayers", *num_layers as u32);
+                self.emit(&obj);
+            }
+            ForwardEvent::Denormalized => {
+                self.lap("denormalize");
+                let obj = js_sys::Object::new();
+                set_str(&obj, "type", "denormalized");
+                self.emit(&obj);
+            }
+            ForwardEvent::StemDone { index, total } => {
+                self.lap(&format!("stem extract {}/{}", index + 1, total));
+                let obj = js_sys::Object::new();
+                set_str(&obj, "type", "stem_done");
+                set_u32(&obj, "index", *index as u32);
+                set_u32(&obj, "total", *total as u32);
+                self.emit(&obj);
+            }
+            ForwardEvent::ChunkStarted { index, total } => {
+                wasm_log!("[wasm] chunk {}/{} started", index + 1, total);
+                self.last = perf_now();
+                let obj = js_sys::Object::new();
+                set_str(&obj, "type", "chunk_started");
+                set_u32(&obj, "index", *index as u32);
+                set_u32(&obj, "total", *total as u32);
+                self.emit(&obj);
+            }
+            ForwardEvent::ChunkDone { index, total } => {
+                self.lap(&format!("chunk {}/{} done", index + 1, total));
+                let obj = js_sys::Object::new();
+                set_str(&obj, "type", "chunk_done");
+                set_u32(&obj, "index", *index as u32);
+                set_u32(&obj, "total", *total as u32);
+                self.emit(&obj);
+            }
+            _ => {}
+        }
+    }
+
+    fn wants_stats(&self) -> bool {
+        false
+    }
+}
+
 type B = Wgpu;
 
 const N_FFT: usize = 4096;
 const HOP_LENGTH: usize = 1024;
 
 static PANIC_HOOK: Once = Once::new();
+static WGPU_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 /// Install panic hook so Rust panics show real messages in the browser console.
 fn ensure_panic_hook() {
@@ -222,6 +338,7 @@ fn parse_stem_id(s: &str) -> Option<StemId> {
 /// - `selected_stems`: JS string array of stem names to extract
 /// - `left`, `right`: stereo PCM samples
 /// - `sample_rate`: sample rate of the input audio (resampled internally if != 44100)
+/// - `on_progress`: optional JS callback `(event: object) => void` for progress updates
 ///
 /// Returns a `SeparationResult` with flat buffer: per stem, L then R channel.
 #[wasm_bindgen]
@@ -232,8 +349,10 @@ pub async fn separate(
     left: &[f32],
     right: &[f32],
     sample_rate: u32,
+    on_progress: Option<js_sys::Function>,
 ) -> Result<SeparationResult, JsError> {
     ensure_panic_hook();
+    let t_total = perf_now();
 
     let stem_strs: Vec<String> = serde_wasm_bindgen::from_value(selected_stems)
         .map_err(|e| JsError::new(&format!("Invalid stems array: {}", e)))?;
@@ -251,15 +370,28 @@ pub async fn separate(
         _ => return Err(JsError::new(&format!("Unknown model: {}", model_id))),
     };
 
-    // WebGPU device must be initialized asynchronously on WASM
+    // WebGPU device must be initialized asynchronously on WASM (only once)
+    let t0 = perf_now();
     let device = WgpuDevice::default();
-    init_setup_async::<WebGpu>(&device, RuntimeOptions::default()).await;
+    if !WGPU_INITIALIZED.load(Ordering::SeqCst) {
+        init_setup_async::<WebGpu>(&device, RuntimeOptions::default()).await;
+        WGPU_INITIALIZED.store(true, Ordering::SeqCst);
+    }
+    wasm_log!("[wasm] WebGPU init: {:.0}ms", perf_now() - t0);
 
+    let t0 = perf_now();
     let model = Demucs::<B>::from_bytes(opts, model_bytes, device)
         .map_err(|e| JsError::new(&format!("Failed to load model: {}", e)))?;
+    wasm_log!("[wasm] Model load: {:.0}ms", perf_now() - t0);
 
-    let stems = model.separate(left, right, sample_rate).await
+    wasm_log!("[wasm] Input: {}ch x {} samples @ {}Hz", 2, left.len(), sample_rate);
+
+    let t0 = perf_now();
+    let mut listener = ProgressListener::new(on_progress);
+    let stems = model.separate_with_listener(left, right, sample_rate, &mut listener).await
         .map_err(|e| JsError::new(&format!("Separation failed: {}", e)))?;
+    wasm_log!("[wasm] Inference: {:.0}ms", perf_now() - t0);
+
     let n_samples = left.len() as u32;
 
     // Build flat buffer and collect names
@@ -275,6 +407,8 @@ pub async fn separate(
         audio.extend_from_slice(&stem.right);
         stem_names.push(name);
     }
+
+    wasm_log!("[wasm] Total: {:.0}ms", perf_now() - t_total);
 
     Ok(SeparationResult {
         audio,

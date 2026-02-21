@@ -88,6 +88,12 @@ pub enum ForwardEvent {
 
     /// A stem has been fully extracted (iSTFT + combine).
     StemDone { index: usize, total: usize },
+
+    /// A chunk is about to be processed (chunked inference for long audio).
+    ChunkStarted { index: usize, total: usize },
+
+    /// A chunk has finished processing.
+    ChunkDone { index: usize, total: usize },
 }
 
 /// Trait for observing the forward pass. Implement this for UI, debugging, etc.
@@ -98,6 +104,11 @@ pub trait ForwardListener {
     /// Return `true` to receive `TensorStats` in events. Computing stats has
     /// a cost (tensor reduction ops), so return `false` for pure progress UI.
     fn wants_stats(&self) -> bool {
+        false
+    }
+
+    /// Return `true` to cancel the current operation. Checked between chunks.
+    fn is_cancelled(&self) -> bool {
         false
     }
 }
@@ -154,6 +165,12 @@ impl ForwardListener for DebugListener {
             }
             ForwardEvent::StemDone { index, total } => {
                 eprintln!("[debug] stem {}/{total} extracted", index + 1);
+            }
+            ForwardEvent::ChunkStarted { index, total } => {
+                eprintln!("[debug] chunk {}/{total} started", index + 1);
+            }
+            ForwardEvent::ChunkDone { index, total } => {
+                eprintln!("[debug] chunk {}/{total} done", index + 1);
             }
         }
     }

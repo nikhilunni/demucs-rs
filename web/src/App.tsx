@@ -5,9 +5,15 @@ import { ModelSidebar } from "./components/ModelSidebar";
 import { SpectrogramView } from "./components/SpectrogramView";
 import { PlayerControls } from "./components/PlayerControls";
 import { StemResults, type StemData } from "./components/StemResults";
+import {
+  ModelProgress,
+  reduceProgress,
+  INITIAL_PROGRESS,
+  type ModelProgressState,
+} from "./components/ModelProgress";
 import { useAudioPlayer } from "./hooks/useAudioPlayer";
 import { useMultiTrackPlayer, type StemTrack } from "./hooks/useMultiTrackPlayer";
-import { useDemucsWorker } from "./hooks/useDemucsWorker";
+import { useDemucsWorker, type ProgressEvent } from "./hooks/useDemucsWorker";
 import { renderSpectrogramImage } from "./dsp/colormap";
 import { encodeWavUrl } from "./dsp/wav";
 import { loadModel } from "./models/modelCache";
@@ -36,6 +42,7 @@ type Phase =
 export default function App() {
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [trackInfo, setTrackInfo] = useState<TrackInfo | null>(null);
+  const [progress, setProgress] = useState<ModelProgressState>(INITIAL_PROGRESS);
 
   const audioUrl = trackInfo?.audioUrl ?? null;
   const player = useAudioPlayer(audioUrl);
@@ -115,9 +122,14 @@ export default function App() {
     }
   }, [phase, trackInfo, worker]);
 
+  // Stable ref for progress callback (avoids recreating closure)
+  const progressRef = useRef<ModelProgressState>(INITIAL_PROGRESS);
+
   const handleRun = useCallback(async (selection: SelectedModel) => {
     if (!trackInfo) return;
 
+    setProgress(INITIAL_PROGRESS);
+    progressRef.current = INITIAL_PROGRESS;
     setPhase({ kind: "separating" });
     await new Promise((r) => setTimeout(r, 60));
 
@@ -129,15 +141,25 @@ export default function App() {
       const modelBytes = new Uint8Array(bytes);
       const stemNames = selection.stems.map((s) => s as string);
 
+      // Progress callback — accumulate state and push to React
+      const onProgress = (event: ProgressEvent) => {
+        const next = reduceProgress(progressRef.current, event);
+        progressRef.current = next;
+        setProgress(next);
+      };
+
       // Run separation in worker (transfers modelBytes buffer)
-      const { audio, stemNames: names, nSamples, numStems } = await worker.separate({
-        modelBytes,
-        modelId: selection.variant.id,
-        stems: stemNames,
-        left: trackInfo.left,
-        right: trackInfo.right,
-        sampleRate: trackInfo.sampleRate,
-      });
+      const { audio, stemNames: names, nSamples, numStems } = await worker.separate(
+        {
+          modelBytes,
+          modelId: selection.variant.id,
+          stems: stemNames,
+          left: trackInfo.left,
+          right: trackInfo.right,
+          sampleRate: trackInfo.sampleRate,
+        },
+        onProgress,
+      );
 
       // Build per-stem data
       const stems: StemData[] = [];
@@ -256,16 +278,7 @@ export default function App() {
               />
 
               {phase.kind === "separating" && (
-                <div className="separating-indicator">
-                  <div className="loading-bars">
-                    <div className="loading-bar" style={{ animationDelay: "0s" }} />
-                    <div className="loading-bar" style={{ animationDelay: "0.15s" }} />
-                    <div className="loading-bar" style={{ animationDelay: "0.3s" }} />
-                    <div className="loading-bar" style={{ animationDelay: "0.45s" }} />
-                    <div className="loading-bar" style={{ animationDelay: "0.6s" }} />
-                  </div>
-                  <span className="loading-text">Separating stems...</span>
-                </div>
+                <ModelProgress progress={progress} />
               )}
 
               {phase.kind === "separated" && (

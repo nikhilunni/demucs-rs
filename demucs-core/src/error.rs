@@ -13,6 +13,8 @@ pub enum DemucsError {
     Tensor(String),
     /// Internal invariant violation (e.g. skip stack empty).
     Internal(String),
+    /// The operation was cancelled by the caller.
+    Cancelled,
 }
 
 impl fmt::Display for DemucsError {
@@ -22,6 +24,7 @@ impl fmt::Display for DemucsError {
             DemucsError::Dsp(msg) => write!(f, "DSP error: {}", msg),
             DemucsError::Tensor(msg) => write!(f, "tensor error: {}", msg),
             DemucsError::Internal(msg) => write!(f, "internal error: {}", msg),
+            DemucsError::Cancelled => write!(f, "operation cancelled"),
         }
     }
 }

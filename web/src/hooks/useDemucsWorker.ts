@@ -22,10 +22,20 @@ export interface SeparateOptions {
   sampleRate: number;
 }
 
+/** Progress events emitted during model forward pass. */
+export type ProgressEvent =
+  | { type: "chunk_started"; index: number; total: number }
+  | { type: "chunk_done"; index: number; total: number }
+  | { type: "encoder_done"; domain: "freq" | "time"; layer: number; numLayers: number }
+  | { type: "transformer_done" }
+  | { type: "decoder_done"; domain: "freq" | "time"; layer: number; numLayers: number }
+  | { type: "denormalized" }
+  | { type: "stem_done"; index: number; total: number };
+
 export interface DemucsWorker {
   init(wasmUrl: string): Promise<{ registry: any }>;
   spectrogram(samples: Float32Array): Promise<SpectrogramResult>;
-  separate(opts: SeparateOptions): Promise<SeparateResult>;
+  separate(opts: SeparateOptions, onProgress?: (event: ProgressEvent) => void): Promise<SeparateResult>;
 }
 
 /**
@@ -38,6 +48,7 @@ export function useDemucsWorker(): DemucsWorker {
     new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>(),
   );
   const idRef = useRef(0);
+  const progressRef = useRef<((event: ProgressEvent) => void) | null>(null);
 
   useEffect(() => {
     const worker = new Worker(
@@ -48,6 +59,13 @@ export function useDemucsWorker(): DemucsWorker {
 
     worker.onmessage = (e: MessageEvent) => {
       const { id, type, ...data } = e.data;
+
+      // Progress events are fire-and-forget (no id)
+      if (type === "progress") {
+        progressRef.current?.(data.event);
+        return;
+      }
+
       const pending = pendingRef.current.get(id);
       if (!pending) return;
       pendingRef.current.delete(id);
@@ -98,8 +116,10 @@ export function useDemucsWorker(): DemucsWorker {
   );
 
   const separate = useCallback(
-    (opts: SeparateOptions) =>
-      send("separate", opts, [opts.modelBytes.buffer]),
+    (opts: SeparateOptions, onProgress?: (event: ProgressEvent) => void) => {
+      progressRef.current = onProgress ?? null;
+      return send("separate", opts, [opts.modelBytes.buffer]);
+    },
     [send],
   );
 

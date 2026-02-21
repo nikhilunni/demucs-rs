@@ -31,6 +31,12 @@ self.onmessage = async (e: MessageEvent) => {
 
       case "separate": {
         await wasmReady;
+
+        // Progress callback: forward events to main thread (fire-and-forget)
+        const onProgress = (event: any) => {
+          self.postMessage({ type: "progress", event });
+        };
+
         const result = await separate(
           data.modelBytes,
           data.modelId,
@@ -38,6 +44,7 @@ self.onmessage = async (e: MessageEvent) => {
           data.left,
           data.right,
           data.sampleRate,
+          onProgress,
         );
         // Read getters before take_audio() which consumes the result
         const stemNames: string[] = result.stem_names();

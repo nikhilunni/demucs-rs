@@ -2001,10 +2001,12 @@ dependencies = [
  "console_error_panic_hook",
  "demucs-core",
  "getrandom 0.3.4",
+ "js-sys",
  "serde",
  "serde-wasm-bindgen",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
