@@ -102,7 +102,8 @@ impl<B: Backend> Demucs<B> {
 
                 // Apply triangular window and accumulate
                 let window = triangular_window(chunk_len);
-                for (s, stem) in chunk_stems.iter().enumerate() {
+                for stem in chunk_stems.iter() {
+                    let s = info.stems.iter().position(|&id| id == stem.id).unwrap();
                     for i in 0..chunk_len {
                         let w = window[i];
                         out_left[s][start + i] += w * stem.left[i];
