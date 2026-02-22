@@ -8,6 +8,7 @@ use demucs_core::weights::tensor_store;
 use demucs_core::{Demucs, ModelOptions};
 use burn::backend::wgpu::{Wgpu, RuntimeOptions, WgpuDevice, init_setup_async};
 use burn::backend::wgpu::graphics::WebGpu;
+use cubecl::config::{GlobalConfig, autotune::{AutotuneConfig, AutotuneLevel}};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -374,7 +375,22 @@ pub async fn separate(
     let t0 = perf_now();
     let device = WgpuDevice::default();
     if !WGPU_INITIALIZED.load(Ordering::SeqCst) {
-        init_setup_async::<WebGpu>(&device, RuntimeOptions::default()).await;
+        // Minimal autotune: coarser shape anchoring groups more dispatch shapes
+        // under the same autotune key, reducing shader compilations and improving
+        // cached (second-run) performance by ~30% vs Balanced.
+        GlobalConfig::set(GlobalConfig {
+            autotune: AutotuneConfig {
+                level: AutotuneLevel::Minimal,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+        let options = RuntimeOptions {
+            tasks_max: 64,
+            ..Default::default()
+        };
+        init_setup_async::<WebGpu>(&device, options).await;
         WGPU_INITIALIZED.store(true, Ordering::SeqCst);
     }
     wasm_log!("[wasm] WebGPU init: {:.0}ms", perf_now() - t0);
