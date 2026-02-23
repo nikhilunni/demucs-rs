@@ -8,11 +8,11 @@ name = "demucs"
 path = "src/main.rs"
 
 [features]
-default = ["wgpu", "autotune"]
-wgpu = ["demucs-core/wgpu", "burn/wgpu"]
-cuda = ["demucs-core/cuda", "burn/cuda"]
-cpu = ["demucs-core/ndarray", "burn/ndarray"]
-autotune = ["demucs-core/autotune"]
+default = []
+macos   = ["demucs-core/wgpu", "demucs-core/autotune", "burn/wgpu", "burn/autotune", "burn/metal"]
+linux   = ["demucs-core/wgpu", "demucs-core/autotune", "burn/wgpu", "burn/autotune", "burn/vulkan"]
+windows = ["demucs-core/wgpu", "demucs-core/autotune", "burn/wgpu", "burn/autotune", "burn/vulkan"]
+cpu     = ["demucs-core/ndarray", "burn/ndarray"]
 
 [dependencies]
 demucs-core = { path = "../demucs-core" }

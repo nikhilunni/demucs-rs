@@ -1,4 +1,18 @@
-.PHONY: wasm wasm-release web dev dev-release clean
+.PHONY: cli wasm wasm-release web dev dev-release clean
+
+# Auto-detect platform for native CLI build
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+  CLI_FEATURE := macos
+else ifeq ($(UNAME_S),Linux)
+  CLI_FEATURE := linux
+else
+  CLI_FEATURE := windows
+endif
+
+# Build native CLI (release, auto-detects GPU backend)
+cli:
+	cargo build -p demucs-cli --release --no-default-features --features $(CLI_FEATURE)
 
 # Build WASM (debug — fast compile, slow runtime)
 wasm:

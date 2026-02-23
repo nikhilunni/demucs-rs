@@ -16,16 +16,13 @@ use demucs_core::{Demucs, ModelOptions, num_chunks};
 
 use crate::progress::CliListener;
 
-#[cfg(feature = "wgpu")]
+#[cfg(any(feature = "macos", feature = "linux", feature = "windows"))]
 use burn::backend::wgpu::{RuntimeOptions, init_setup, graphics::AutoGraphicsApi};
-#[cfg(feature = "wgpu")]
+#[cfg(any(feature = "macos", feature = "linux", feature = "windows"))]
 use cubecl::config::{GlobalConfig, autotune::AutotuneConfig, cache::CacheConfig};
 
-#[cfg(feature = "wgpu")]
+#[cfg(any(feature = "macos", feature = "linux", feature = "windows"))]
 type B = burn::backend::wgpu::Wgpu;
-
-#[cfg(feature = "cuda")]
-type B = burn::backend::cuda::Cuda;
 
 #[cfg(feature = "cpu")]
 type B = burn::backend::NdArray<f32>;
@@ -152,7 +149,7 @@ fn main() -> Result<()> {
     eprintln!("Loading model...");
     let device = Default::default();
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(any(feature = "macos", feature = "linux", feature = "windows"))]
     {
         GlobalConfig::set(GlobalConfig {
             autotune: AutotuneConfig {
@@ -165,6 +162,7 @@ fn main() -> Result<()> {
             tasks_max: 64,
             ..Default::default()
         };
+
         init_setup::<AutoGraphicsApi>(&device, options);
     }
 
