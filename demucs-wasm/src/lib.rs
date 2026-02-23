@@ -180,7 +180,7 @@ impl SpectrogramResult {
 /// Uses `n_fft = 4096` and `hop_length = 1024` to match HTDemucs.
 #[wasm_bindgen]
 pub fn compute_spectrogram(samples: &[f32]) -> Result<SpectrogramResult, JsError> {
-    let num_bins = N_FFT / 2 + 1;
+    let num_bins = N_FFT / 2; // forward() drops the Nyquist bin
 
     let mut stft = Stft::new(N_FFT, HOP_LENGTH);
     let complex = stft.forward(samples)

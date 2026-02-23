@@ -17,6 +17,11 @@ use demucs_core::{Demucs, ModelOptions, num_chunks};
 use crate::progress::CliListener;
 
 #[cfg(feature = "wgpu")]
+use burn::backend::wgpu::{RuntimeOptions, init_setup, graphics::AutoGraphicsApi};
+#[cfg(feature = "wgpu")]
+use cubecl::config::{GlobalConfig, autotune::AutotuneConfig, cache::CacheConfig};
+
+#[cfg(feature = "wgpu")]
 type B = burn::backend::wgpu::Wgpu;
 
 #[cfg(feature = "cuda")]
@@ -146,6 +151,23 @@ fn main() -> Result<()> {
     // 5. Load model
     eprintln!("Loading model...");
     let device = Default::default();
+
+    #[cfg(feature = "wgpu")]
+    {
+        GlobalConfig::set(GlobalConfig {
+            autotune: AutotuneConfig {
+                cache: CacheConfig::Global,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let options = RuntimeOptions {
+            tasks_max: 64,
+            ..Default::default()
+        };
+        init_setup::<AutoGraphicsApi>(&device, options);
+    }
+
     let model = Demucs::<B>::from_bytes(opts, &bytes, device)
         .context("Failed to load model weights")?;
 

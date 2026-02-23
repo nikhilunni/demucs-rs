@@ -17,6 +17,7 @@ autotune = ["demucs-core/autotune"]
 [dependencies]
 demucs-core = { path = "../demucs-core" }
 burn = { version = "0.20.1" }
+cubecl = { version = "0.9", default-features = false }
 clap = { version = "4", features = ["derive"] }
 hound = "3"
 ureq = "2"
