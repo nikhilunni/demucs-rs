@@ -1293,6 +1293,26 @@ body {
   color: var(--accent);
 }
 
+.stem-row__download {
+  width: 24px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text-micro);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.stem-row__download:hover {
+  border-color: #6ee7a0;
+  color: #6ee7a0;
+}
+
 .stem-row__spectrogram {
   flex: 1;
   min-width: 0;

@@ -177,7 +177,7 @@ fn main() -> Result<()> {
             && std::fs::read_dir(&cache_dir).map_or(false, |mut d| d.next().is_some());
         if !cached {
             eprintln!("Pre-compiling GPU shaders (first run only)...");
-            model.warmup();
+            pollster::block_on(model.warmup());
         }
     }
 

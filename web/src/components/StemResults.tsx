@@ -54,6 +54,15 @@ function StemRow({
   const isSolo = player.solo === stem.name;
   const color = STEM_COLORS[stem.name] ?? "var(--text)";
 
+  const handleDownload = () => {
+    const a = document.createElement("a");
+    a.href = stem.url;
+    a.download = `${stem.name}.wav`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   return (
     <div className="stem-row">
       <div className="stem-row__controls">
@@ -74,6 +83,17 @@ function StemRow({
             title="Mute"
           >
             M
+          </button>
+          <button
+            className="stem-row__download"
+            onClick={handleDownload}
+            title="Download WAV"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
           </button>
         </div>
       </div>

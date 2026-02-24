@@ -1,7 +1,5 @@
 use burn::prelude::Backend;
 use burn::tensor::{Tensor, TensorData};
-use realfft::num_complex::Complex;
-
 use crate::dsp::cac::{cac_to_stft, stft_to_cac};
 use crate::dsp::resample::resample_channel;
 use crate::dsp::stft::Stft;
@@ -36,19 +34,17 @@ impl<B: Backend> Demucs<B> {
         Ok(Self { opts, models, device })
     }
 
-    /// Run a dummy forward pass with zero tensors to pre-compile all GPU shaders.
+    /// Run the full inference pipeline with dummy silence to pre-compile all
+    /// GPU shaders (STFT, forward, CaC conversion, iSTFT, GPU→CPU readback).
     ///
-    /// Call once after loading the model to avoid shader compilation stalls during
-    /// real inference. Shapes match `TRAINING_LENGTH` so all kernel variants are
-    /// covered.
-    pub fn warmup(&self) {
-        let n_frames = (TRAINING_LENGTH + HOP_LENGTH - 1) / HOP_LENGTH; // 336
-        let freq: Tensor<B, 4> = Tensor::zeros([1, 4, N_FFT / 2, n_frames], &self.device);
-        let time: Tensor<B, 3> = Tensor::zeros([1, 2, TRAINING_LENGTH], &self.device);
-
-        for model in &self.models {
-            let _ = model.forward(freq.clone(), time.clone());
-        }
+    /// Call once after loading the model to avoid shader compilation stalls
+    /// during real inference.
+    pub async fn warmup(&self) {
+        let dummy = vec![0.0f32; TRAINING_LENGTH];
+        let info = self.opts.model_info();
+        let _ = self.separate_single_segment(
+            &dummy, &dummy, TRAINING_LENGTH, info, &mut NoOpListener,
+        ).await;
     }
 
     pub async fn separate(
@@ -298,9 +294,6 @@ fn build_time_tensor<B: Backend>(
 }
 
 /// Extract all stems from a single model's output (4-stem or 6-stem).
-///
-/// Batches GPU→CPU readback: instead of 3 readbacks per stem (12 for 4 stems),
-/// does 2 bulk readbacks (freq + time) and splits on CPU.
 async fn extract_all_stems<B: Backend>(
     freq_out: &Tensor<B, 4>,  // [1, n_sources * 4, F, padded_T]
     time_out: &Tensor<B, 3>,  // [1, n_sources * 2, padded_T]
@@ -310,96 +303,13 @@ async fn extract_all_stems<B: Backend>(
     n_samples: usize,
     stft: &mut Stft,
 ) -> Result<Vec<Stem>> {
-    let n_sources = info.stems.len();
-    let freq_bins = N_FFT / 2; // 2048
-
-    // ── Bulk GPU→CPU readback #1: all freq data ──
-    // Trim time dim on GPU (view op), squeeze batch → [n_sources*4, F, n_frames]
-    let freq_trimmed = freq_out.clone()
-        .narrow(3, 0, n_frames)
-        .squeeze_dim::<3>(0);
-    let freq_data: Vec<f32> = freq_trimmed
-        .to_data_async()
-        .await
-        .map_err(|e| DemucsError::Tensor(format!("freq bulk read failed: {}", e)))?
-        .to_vec()
-        .map_err(|e| DemucsError::Tensor(format!("freq bulk conversion failed: {}", e)))?;
-
-    // ── Bulk GPU→CPU readback #2: all time data ──
-    // Trim to n_samples on GPU (view op), squeeze batch → [n_sources*2, n_samples]
-    let time_trimmed = time_out.clone()
-        .narrow(2, 0, n_samples)
-        .squeeze_dim::<2>(0);
-    let time_data: Vec<f32> = time_trimmed
-        .to_data_async()
-        .await
-        .map_err(|e| DemucsError::Tensor(format!("time bulk read failed: {}", e)))?
-        .to_vec()
-        .map_err(|e| DemucsError::Tensor(format!("time bulk conversion failed: {}", e)))?;
-
-    // ── CPU-side: split per stem and reconstruct waveforms ──
-    // freq_data layout (row-major): [channel][freq_bin][frame]
-    // Each stem has 4 channels: [left_real, left_imag, right_real, right_imag]
-    let ch_stride = freq_bins * n_frames; // elements per channel
-    let mut stems = Vec::with_capacity(n_sources);
+    let mut stems = Vec::with_capacity(info.stems.len());
     for (i, &stem_id) in info.stems.iter().enumerate() {
-        // Extract CaC data for this stem from the bulk freq buffer
-        let base = i * 4 * ch_stride;
-        let left_real = &freq_data[base..base + ch_stride];
-        let left_imag = &freq_data[base + ch_stride..base + 2 * ch_stride];
-        let right_real = &freq_data[base + 2 * ch_stride..base + 3 * ch_stride];
-        let right_imag = &freq_data[base + 3 * ch_stride..base + 4 * ch_stride];
-
-        // CaC → complex spectrogram (same logic as cac_to_stft but on CPU slices)
-        let left_spec = cac_slices_to_stft(left_real, left_imag, freq_bins, n_frames);
-        let right_spec = cac_slices_to_stft(right_real, right_imag, freq_bins, n_frames);
-
-        let left_freq_wav = stft.inverse(&left_spec, padded_len)?;
-        let right_freq_wav = stft.inverse(&right_spec, padded_len)?;
-
-        // Extract time data for this stem
-        let time_base = i * 2 * n_samples;
-        let left_time = &time_data[time_base..time_base + n_samples];
-        let right_time = &time_data[time_base + n_samples..time_base + 2 * n_samples];
-
-        // Combine: freq waveform (trimmed to n_samples) + time waveform
-        let left: Vec<f32> = left_freq_wav[..n_samples]
-            .iter()
-            .zip(left_time)
-            .map(|(f, t)| f + t)
-            .collect();
-        let right: Vec<f32> = right_freq_wav[..n_samples]
-            .iter()
-            .zip(right_time)
-            .map(|(f, t)| f + t)
-            .collect();
-
-        stems.push(Stem { id: stem_id, left, right });
+        stems.push(
+            extract_single_stem::<B>(freq_out, time_out, i, stem_id, n_frames, padded_len, n_samples, stft).await?
+        );
     }
-
     Ok(stems)
-}
-
-/// Convert CaC real/imaginary slices to complex spectrogram on CPU.
-///
-/// Input slices are in `[freq_bin][frame]` layout (row-major from the tensor).
-/// Output is `[frame × (freq_bins + 1)]` with zeroed Nyquist bins.
-fn cac_slices_to_stft(
-    reals: &[f32],
-    imags: &[f32],
-    freq_bins: usize,
-    num_frames: usize,
-) -> Vec<Complex<f32>> {
-    let bins_out = freq_bins + 1;
-    let mut spectrogram = vec![Complex::new(0.0, 0.0); num_frames * bins_out];
-
-    for (i, (&re, &im)) in reals.iter().zip(imags).enumerate() {
-        let frame = i % num_frames;
-        let bin = i / num_frames;
-        spectrogram[frame * bins_out + bin] = Complex::new(re, im);
-    }
-
-    spectrogram
 }
 
 /// Extract one stem by index from the model output, ISTFT, and combine freq + time.

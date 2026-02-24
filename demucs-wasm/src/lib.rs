@@ -334,8 +334,8 @@ pub async fn warmup_model(
     wasm_log!("[wasm] Warmup: model load {:.0}ms", perf_now() - t0);
 
     let t0 = perf_now();
-    model.warmup();
-    wasm_log!("[wasm] Warmup: forward pass {:.0}ms", perf_now() - t0);
+    model.warmup().await;
+    wasm_log!("[wasm] Warmup: full pipeline {:.0}ms", perf_now() - t0);
 
     Ok(())
 }
