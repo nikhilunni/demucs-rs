@@ -34,13 +34,15 @@ impl<B: Backend> Demucs<B> {
         Ok(Self { opts, models, device })
     }
 
-    /// Run the full inference pipeline with dummy silence to pre-compile all
-    /// GPU shaders (STFT, forward, CaC conversion, iSTFT, GPU→CPU readback).
+    /// Run the full inference pipeline with dummy audio to pre-compile all
+    /// GPU shaders and resolve CubeCL autotune for every matmul shape.
     ///
-    /// Call once after loading the model to avoid shader compilation stalls
-    /// during real inference.
+    /// Uses a synthetic sine wave (not zeros) so autotune sees representative
+    /// value distributions and selects the same kernel variants as real audio.
     pub async fn warmup(&self) {
-        let dummy = vec![0.0f32; TRAINING_LENGTH];
+        let dummy: Vec<f32> = (0..TRAINING_LENGTH)
+            .map(|i| (i as f32 * 0.1).sin() * 0.5)
+            .collect();
         let info = self.opts.model_info();
         let _ = self.separate_single_segment(
             &dummy, &dummy, TRAINING_LENGTH, info, &mut NoOpListener,
