@@ -16,12 +16,12 @@ use demucs_core::{Demucs, ModelOptions, num_chunks};
 
 use crate::progress::CliListener;
 
-#[cfg(any(feature = "macos", feature = "linux", feature = "windows"))]
+#[cfg(not(feature = "cpu"))]
 use burn::backend::wgpu::{RuntimeOptions, init_setup, graphics::AutoGraphicsApi};
-#[cfg(any(feature = "macos", feature = "linux", feature = "windows"))]
+#[cfg(not(feature = "cpu"))]
 use cubecl::config::{GlobalConfig, autotune::AutotuneConfig, cache::CacheConfig};
 
-#[cfg(any(feature = "macos", feature = "linux", feature = "windows"))]
+#[cfg(not(feature = "cpu"))]
 type B = burn::backend::wgpu::Wgpu;
 
 #[cfg(feature = "cpu")]
@@ -149,7 +149,7 @@ fn main() -> Result<()> {
     eprintln!("Loading model...");
     let device = Default::default();
 
-    #[cfg(any(feature = "macos", feature = "linux", feature = "windows"))]
+    #[cfg(not(feature = "cpu"))]
     {
         GlobalConfig::set(GlobalConfig {
             autotune: AutotuneConfig {
@@ -159,7 +159,7 @@ fn main() -> Result<()> {
             ..Default::default()
         });
         let options = RuntimeOptions {
-            tasks_max: 64,
+            tasks_max: 128,
             ..Default::default()
         };
 
@@ -168,6 +168,18 @@ fn main() -> Result<()> {
 
     let model = Demucs::<B>::from_bytes(opts, &bytes, device)
         .context("Failed to load model weights")?;
+
+    // 5b. Warmup GPU shaders if autotune cache is empty (first run only)
+    #[cfg(not(feature = "cpu"))]
+    {
+        let cache_dir = CacheConfig::Global.root().join("autotune");
+        let cached = cache_dir.is_dir()
+            && std::fs::read_dir(&cache_dir).map_or(false, |mut d| d.next().is_some());
+        if !cached {
+            eprintln!("Pre-compiling GPU shaders (first run only)...");
+            model.warmup();
+        }
+    }
 
     // 6. Run separation
     eprintln!("Separating...");

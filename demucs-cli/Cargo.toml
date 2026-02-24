@@ -9,14 +9,11 @@ path = "src/main.rs"
 
 [features]
 default = []
-macos   = ["demucs-core/wgpu", "demucs-core/autotune", "burn/wgpu", "burn/autotune", "burn/metal"]
-linux   = ["demucs-core/wgpu", "demucs-core/autotune", "burn/wgpu", "burn/autotune", "burn/vulkan"]
-windows = ["demucs-core/wgpu", "demucs-core/autotune", "burn/wgpu", "burn/autotune", "burn/vulkan"]
 cpu     = ["demucs-core/ndarray", "burn/ndarray"]
 
 [dependencies]
-demucs-core = { path = "../demucs-core" }
-burn = { version = "0.20.1" }
+demucs-core = { path = "../demucs-core", features = ["wgpu", "autotune", "fusion"] }
+burn = { version = "0.20.1", features = ["wgpu", "autotune", "fusion"] }
 cubecl = { version = "0.9", default-features = false }
 clap = { version = "4", features = ["derive"] }
 hound = "3"
@@ -24,3 +21,9 @@ ureq = "2"
 indicatif = "0.17"
 anyhow = "1"
 pollster = "0.4"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+burn = { version = "0.20.1", features = ["metal"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+burn = { version = "0.20.1", features = ["vulkan"] }

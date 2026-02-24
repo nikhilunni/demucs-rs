@@ -9,6 +9,7 @@ ndarray = ["burn/ndarray"]
 wgpu = ["burn/wgpu"]
 cuda = ["burn/cuda"]
 autotune = ["burn/autotune"]
+fusion = ["burn/fusion"]
 
 [dependencies]
 realfft = "3.5.0"

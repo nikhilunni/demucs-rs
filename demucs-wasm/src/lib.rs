@@ -285,6 +285,61 @@ pub fn validate_model_weights(bytes: &[u8], model_id: &str) -> Result<JsValue, J
         .map_err(|e| JsError::new(&format!("serialization failed: {}", e)))
 }
 
+// ─── Warmup API ─────────────────────────────────────────────────────────────
+
+/// Initialize WebGPU, load the model, and run a dummy forward pass to
+/// pre-compile all GPU shaders. Call once before real inference to avoid
+/// shader compilation stalls.
+///
+/// Returns after the warmup forward pass completes.
+#[wasm_bindgen]
+pub async fn warmup_model(
+    model_bytes: &[u8],
+    model_id: &str,
+) -> Result<(), JsError> {
+    ensure_panic_hook();
+
+    // Initialize WebGPU (same as separate)
+    let t0 = perf_now();
+    let device = WgpuDevice::default();
+    if !WGPU_INITIALIZED.load(Ordering::SeqCst) {
+        GlobalConfig::set(GlobalConfig {
+            autotune: AutotuneConfig {
+                level: AutotuneLevel::Minimal,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let options = RuntimeOptions {
+            tasks_max: 128,
+            ..Default::default()
+        };
+        init_setup_async::<WebGpu>(&device, options).await;
+        WGPU_INITIALIZED.store(true, Ordering::SeqCst);
+    }
+    wasm_log!("[wasm] Warmup: WebGPU init {:.0}ms", perf_now() - t0);
+
+    let t0 = perf_now();
+    let opts = match model_id {
+        HTDEMUCS_ID => ModelOptions::FourStem,
+        HTDEMUCS_6S_ID => ModelOptions::SixStem,
+        HTDEMUCS_FT_ID => {
+            // For warmup, just use default 4 stems — we only need to trigger shaders
+            ModelOptions::FineTuned(vec![StemId::Drums, StemId::Bass, StemId::Other, StemId::Vocals])
+        }
+        _ => return Err(JsError::new(&format!("Unknown model: {}", model_id))),
+    };
+    let model = Demucs::<B>::from_bytes(opts, model_bytes, device)
+        .map_err(|e| JsError::new(&format!("Warmup model load failed: {}", e)))?;
+    wasm_log!("[wasm] Warmup: model load {:.0}ms", perf_now() - t0);
+
+    let t0 = perf_now();
+    model.warmup();
+    wasm_log!("[wasm] Warmup: forward pass {:.0}ms", perf_now() - t0);
+
+    Ok(())
+}
+
 // ─── Separation API ────────────────────────────────────────────────────────
 
 /// Result of running source separation. Owns a flat interleaved buffer:
@@ -387,7 +442,7 @@ pub async fn separate(
         });
 
         let options = RuntimeOptions {
-            tasks_max: 64,
+            tasks_max: 128,
             ..Default::default()
         };
         init_setup_async::<WebGpu>(&device, options).await;

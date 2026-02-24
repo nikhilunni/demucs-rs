@@ -7,8 +7,8 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-demucs-core = { path = "../demucs-core", features = ["wgpu", "autotune"] }
-burn = { version = "0.20.1", features = ["wgpu", "autotune"] }
+demucs-core = { path = "../demucs-core", features = ["wgpu", "autotune", "fusion"] }
+burn = { version = "0.20.1", features = ["wgpu", "autotune", "fusion"] }
 cubecl = { version = "0.9", default-features = false }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

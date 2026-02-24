@@ -246,6 +246,99 @@ body {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   Warmup / Splash Screen
+   ══════════════════════════════════════════════════════════════ */
+.warmup {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  animation: fade-in 0.4s ease;
+}
+
+.warmup-glow {
+  position: absolute;
+  width: 280px;
+  height: 280px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(124, 111, 240, 0.12), transparent 70%);
+  animation: warmup-breathe 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes warmup-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+
+.warmup-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+
+.warmup-rings {
+  position: relative;
+  width: 88px;
+  height: 88px;
+}
+
+.warmup-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid transparent;
+}
+
+.warmup-ring--outer {
+  inset: 0;
+  border-top-color: var(--accent-cool);
+  border-right-color: rgba(124, 111, 240, 0.2);
+  animation: ring-spin 2s linear infinite;
+}
+
+.warmup-ring--inner {
+  inset: 12px;
+  border-bottom-color: var(--accent);
+  border-left-color: rgba(240, 122, 92, 0.2);
+  animation: ring-spin 1.4s linear infinite reverse;
+}
+
+@keyframes ring-spin {
+  to { transform: rotate(360deg); }
+}
+
+.warmup-icon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-cool);
+  animation: warmup-pulse 2s ease-in-out infinite;
+}
+
+@keyframes warmup-pulse {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+.warmup-text {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.warmup-subtext {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: -12px;
+}
+
+/* ══════════════════════════════════════════════════════════════
    Loading State
    ══════════════════════════════════════════════════════════════ */
 .loading {

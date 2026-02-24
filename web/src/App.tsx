@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DropZone } from "./components/DropZone";
 import { LoadingState } from "./components/LoadingState";
+import { WarmupScreen } from "./components/WarmupScreen";
 import { ModelSidebar } from "./components/ModelSidebar";
 import { SpectrogramView } from "./components/SpectrogramView";
 import { PlayerControls } from "./components/PlayerControls";
@@ -16,7 +17,7 @@ import { useMultiTrackPlayer, type StemTrack } from "./hooks/useMultiTrackPlayer
 import { useDemucsWorker, type ProgressEvent } from "./hooks/useDemucsWorker";
 import { renderSpectrogramImage } from "./dsp/colormap";
 import { encodeWavUrl } from "./dsp/wav";
-import { loadModel } from "./models/modelCache";
+import { isCached, loadModel } from "./models/modelCache";
 import type { SelectedModel } from "./models/registry";
 import { initRegistry } from "./models/registry";
 import wasmUrl from "./wasm/demucs_wasm_bg.wasm?url";
@@ -33,6 +34,7 @@ interface TrackInfo {
 }
 
 type Phase =
+  | { kind: "warmup" }
   | { kind: "idle" }
   | { kind: "loading" }
   | { kind: "ready" }
@@ -40,7 +42,7 @@ type Phase =
   | { kind: "separated"; stems: StemData[]; tracks: StemTrack[] };
 
 export default function App() {
-  const [phase, setPhase] = useState<Phase>({ kind: "idle" });
+  const [phase, setPhase] = useState<Phase>({ kind: "warmup" });
   const [trackInfo, setTrackInfo] = useState<TrackInfo | null>(null);
   const [progress, setProgress] = useState<ModelProgressState>(INITIAL_PROGRESS);
 
@@ -57,10 +59,29 @@ export default function App() {
   const worker = useDemucsWorker();
   const initRef = useRef<Promise<void> | undefined>(undefined);
 
-  // Initialize WASM in the worker on mount
+  // Initialize WASM in the worker on mount, then warmup GPU if a model is cached
   useEffect(() => {
-    initRef.current = worker.init(wasmUrl).then(({ registry }) => {
+    const DEFAULT_MODEL = "htdemucs";
+
+    initRef.current = worker.init(wasmUrl).then(async ({ registry }) => {
       initRegistry(registry);
+
+      // If a model is already cached, warmup GPU shaders with a dummy forward pass
+      const cached = await isCached(DEFAULT_MODEL);
+      if (cached) {
+        const bytes = await loadModel(DEFAULT_MODEL);
+        if (bytes) {
+          try {
+            await worker.warmup({
+              modelBytes: new Uint8Array(bytes),
+              modelId: DEFAULT_MODEL,
+            });
+          } catch (err) {
+            console.warn("GPU warmup failed (non-fatal):", err);
+          }
+        }
+      }
+      setPhase({ kind: "idle" });
     });
   }, [worker]);
 
@@ -230,13 +251,15 @@ export default function App() {
 
   const hasTrack = trackInfo !== null;
   const tagline =
-    phase.kind === "idle"
-      ? "Source Separation"
-      : phase.kind === "loading"
-        ? "Analyzing..."
-        : phase.kind === "separating"
-          ? "Separating..."
-          : trackInfo?.fileName ?? "";
+    phase.kind === "warmup"
+      ? "Initializing..."
+      : phase.kind === "idle"
+        ? "Source Separation"
+        : phase.kind === "loading"
+          ? "Analyzing..."
+          : phase.kind === "separating"
+            ? "Separating..."
+            : trackInfo?.fileName ?? "";
 
   return (
     <div className="app">
@@ -257,6 +280,7 @@ export default function App() {
       </header>
 
       <main className={`main ${hasTrack ? "main--player" : ""}`}>
+        {phase.kind === "warmup" && <WarmupScreen />}
         {phase.kind === "idle" && <DropZone onFile={handleFile} />}
         {phase.kind === "loading" && <LoadingState />}
         {hasTrack && (

@@ -32,8 +32,14 @@ export type ProgressEvent =
   | { type: "denormalized" }
   | { type: "stem_done"; index: number; total: number };
 
+export interface WarmupOptions {
+  modelBytes: Uint8Array;
+  modelId: string;
+}
+
 export interface DemucsWorker {
   init(wasmUrl: string): Promise<{ registry: any }>;
+  warmup(opts: WarmupOptions): Promise<void>;
   spectrogram(samples: Float32Array): Promise<SpectrogramResult>;
   separate(opts: SeparateOptions, onProgress?: (event: ProgressEvent) => void): Promise<SeparateResult>;
 }
@@ -115,6 +121,12 @@ export function useDemucsWorker(): DemucsWorker {
     [send],
   );
 
+  const warmup = useCallback(
+    (opts: WarmupOptions) =>
+      send("warmup", opts, [opts.modelBytes.buffer]),
+    [send],
+  );
+
   const separate = useCallback(
     (opts: SeparateOptions, onProgress?: (event: ProgressEvent) => void) => {
       progressRef.current = onProgress ?? null;
@@ -124,7 +136,7 @@ export function useDemucsWorker(): DemucsWorker {
   );
 
   return useMemo(
-    () => ({ init, spectrogram, separate }),
-    [init, spectrogram, separate],
+    () => ({ init, warmup, spectrogram, separate }),
+    [init, warmup, spectrogram, separate],
   );
 }

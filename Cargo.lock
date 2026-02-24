@@ -453,6 +453,7 @@ dependencies = [
  "burn-core",
  "burn-cpu",
  "burn-cuda",
+ "burn-ir",
  "burn-ndarray",
  "burn-nn",
  "burn-optim",

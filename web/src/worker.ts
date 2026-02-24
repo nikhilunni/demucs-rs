@@ -1,4 +1,4 @@
-import initWasm, { compute_spectrogram, get_model_registry, separate } from "./wasm/demucs_wasm.js";
+import initWasm, { compute_spectrogram, get_model_registry, separate, warmup_model } from "./wasm/demucs_wasm.js";
 
 let wasmReady: Promise<any>;
 
@@ -26,6 +26,13 @@ self.onmessage = async (e: MessageEvent) => {
           { id, type: "spectrogram", mags, numFrames, numBins },
           { transfer: [mags.buffer] },
         );
+        break;
+      }
+
+      case "warmup": {
+        await wasmReady;
+        await warmup_model(data.modelBytes, data.modelId);
+        self.postMessage({ id, type: "warmup" });
         break;
       }
 
