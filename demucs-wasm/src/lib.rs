@@ -1,13 +1,15 @@
-use std::sync::Once;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Once;
 
+use burn::backend::wgpu::graphics::WebGpu;
+use burn::backend::wgpu::{init_setup_async, RuntimeOptions, Wgpu, WgpuDevice};
 use demucs_core::dsp::stft::Stft;
 use demucs_core::listener::{ForwardEvent, ForwardListener};
-use demucs_core::model::metadata::{self, ALL_MODELS, StemId, HTDEMUCS_ID, HTDEMUCS_6S_ID, HTDEMUCS_FT_ID};
+use demucs_core::model::metadata::{
+    self, StemId, ALL_MODELS, HTDEMUCS_6S_ID, HTDEMUCS_FT_ID, HTDEMUCS_ID,
+};
 use demucs_core::weights::tensor_store;
 use demucs_core::{Demucs, ModelOptions};
-use burn::backend::wgpu::{Wgpu, RuntimeOptions, WgpuDevice, init_setup_async};
-use burn::backend::wgpu::graphics::WebGpu;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -122,7 +124,8 @@ pub fn compute_spectrogram(samples: &[f32]) -> Result<SpectrogramResult, JsError
     let num_bins = N_FFT / 2; // forward() drops the Nyquist bin
 
     let mut stft = Stft::new(N_FFT, HOP_LENGTH);
-    let complex = stft.forward(samples)
+    let complex = stft
+        .forward(samples)
         .map_err(|e| JsError::new(&format!("{}", e)))?;
     let num_frames = complex.len() / num_bins;
 
@@ -232,16 +235,17 @@ pub fn validate_model_weights(bytes: &[u8], model_id: &str) -> Result<JsValue, J
 ///
 /// Returns after the warmup forward pass completes.
 #[wasm_bindgen]
-pub async fn warmup_model(
-    model_bytes: &[u8],
-    model_id: &str,
-) -> Result<(), JsError> {
+pub async fn warmup_model(model_bytes: &[u8], model_id: &str) -> Result<(), JsError> {
     ensure_panic_hook();
 
     // Initialize WebGPU (same as separate)
     let device = WgpuDevice::default();
     if !WGPU_INITIALIZED.load(Ordering::SeqCst) {
-        init_setup_async::<WebGpu>(&device, RuntimeOptions::default()).await;
+        let options = RuntimeOptions {
+            tasks_max: 128,
+            ..Default::default()
+        };
+        init_setup_async::<WebGpu>(&device, options).await;
         WGPU_INITIALIZED.store(true, Ordering::SeqCst);
     }
 
@@ -250,7 +254,12 @@ pub async fn warmup_model(
         HTDEMUCS_6S_ID => ModelOptions::SixStem,
         HTDEMUCS_FT_ID => {
             // For warmup, just use default 4 stems — we only need to trigger shaders
-            ModelOptions::FineTuned(vec![StemId::Drums, StemId::Bass, StemId::Other, StemId::Vocals])
+            ModelOptions::FineTuned(vec![
+                StemId::Drums,
+                StemId::Bass,
+                StemId::Other,
+                StemId::Vocals,
+            ])
         }
         _ => return Err(JsError::new(&format!("Unknown model: {}", model_id))),
     };
@@ -338,10 +347,7 @@ pub async fn separate(
         HTDEMUCS_ID => ModelOptions::FourStem,
         HTDEMUCS_6S_ID => ModelOptions::SixStem,
         HTDEMUCS_FT_ID => {
-            let stems: Vec<StemId> = stem_strs
-                .iter()
-                .filter_map(|s| parse_stem_id(s))
-                .collect();
+            let stems: Vec<StemId> = stem_strs.iter().filter_map(|s| parse_stem_id(s)).collect();
             ModelOptions::FineTuned(stems)
         }
         _ => return Err(JsError::new(&format!("Unknown model: {}", model_id))),
@@ -350,7 +356,11 @@ pub async fn separate(
     // WebGPU device must be initialized asynchronously on WASM (only once)
     let device = WgpuDevice::default();
     if !WGPU_INITIALIZED.load(Ordering::SeqCst) {
-        init_setup_async::<WebGpu>(&device, RuntimeOptions::default()).await;
+        let options = RuntimeOptions {
+            tasks_max: 128,
+            ..Default::default()
+        };
+        init_setup_async::<WebGpu>(&device, options).await;
         WGPU_INITIALIZED.store(true, Ordering::SeqCst);
     }
 
@@ -358,7 +368,9 @@ pub async fn separate(
         .map_err(|e| JsError::new(&format!("Failed to load model: {}", e)))?;
 
     let mut listener = ProgressListener::new(on_progress);
-    let stems = model.separate_with_listener(left, right, sample_rate, &mut listener).await
+    let stems = model
+        .separate_with_listener(left, right, sample_rate, &mut listener)
+        .await
         .map_err(|e| JsError::new(&format!("Separation failed: {}", e)))?;
 
     // Use actual stem output length (may differ from input length after
