@@ -1,6 +1,6 @@
 use burn::prelude::Backend;
 use burn::tensor::{Tensor, TensorData};
-use crate::dsp::cac::{cac_to_stft, stft_to_cac};
+use crate::dsp::cac::{cac_data_to_complex, stft_to_cac};
 use crate::dsp::resample::resample_channel;
 use crate::dsp::stft::Stft;
 use crate::listener::{ForwardEvent, ForwardListener, NoOpListener};
@@ -295,7 +295,10 @@ fn build_time_tensor<B: Backend>(
     Tensor::from_data(TensorData::new(data, [1, 2, padded_len]), device)
 }
 
-/// Extract all stems from a single model's output (4-stem or 6-stem).
+/// Extract all stems from a single model's output using bulk GPU readback.
+///
+/// Reads the entire freq_out and time_out tensors in 2 GPU→CPU transfers (instead
+/// of 3 per stem = 12 total), then does all CaC→complex→iSTFT work on CPU.
 async fn extract_all_stems<B: Backend>(
     freq_out: &Tensor<B, 4>,  // [1, n_sources * 4, F, padded_T]
     time_out: &Tensor<B, 3>,  // [1, n_sources * 2, padded_T]
@@ -305,16 +308,78 @@ async fn extract_all_stems<B: Backend>(
     n_samples: usize,
     stft: &mut Stft,
 ) -> Result<Vec<Stem>> {
-    let mut stems = Vec::with_capacity(info.stems.len());
+    let n_sources = info.stems.len();
+    let freq_bins = N_FFT / 2;
+
+    // GPU: trim time dimensions (no sync, stays on GPU)
+    let freq_trimmed = freq_out.clone()
+        .squeeze_dim::<3>(0)         // [n_sources*4, F, padded_T]
+        .narrow(2, 0, n_frames);     // [n_sources*4, F, n_frames]
+
+    let time_trimmed = time_out.clone()
+        .squeeze_dim::<2>(0)         // [n_sources*2, padded_T]
+        .narrow(1, 0, n_samples);    // [n_sources*2, n_samples]
+
+    // Bulk GPU→CPU readback (2 sync points for ALL stems)
+    let freq_data: Vec<f32> = freq_trimmed
+        .reshape([n_sources * 4 * freq_bins * n_frames])
+        .to_data_async()
+        .await
+        .map_err(|e| DemucsError::Tensor(format!("freq bulk read failed: {e}")))?
+        .to_vec()
+        .map_err(|e| DemucsError::Tensor(format!("freq extraction failed: {e}")))?;
+
+    let time_data: Vec<f32> = time_trimmed
+        .reshape([n_sources * 2 * n_samples])
+        .to_data_async()
+        .await
+        .map_err(|e| DemucsError::Tensor(format!("time bulk read failed: {e}")))?
+        .to_vec()
+        .map_err(|e| DemucsError::Tensor(format!("time extraction failed: {e}")))?;
+
+    // CPU-only: extract each stem from the flat buffers
+    let cac_stride = 4 * freq_bins * n_frames;   // floats per stem in freq
+    let ch_stride = 2 * freq_bins * n_frames;     // floats per stereo CaC pair
+    let time_stride = 2 * n_samples;              // floats per stem in time
+
+    let mut stems = Vec::with_capacity(n_sources);
     for (i, &stem_id) in info.stems.iter().enumerate() {
-        stems.push(
-            extract_single_stem::<B>(freq_out, time_out, i, stem_id, n_frames, padded_len, n_samples, stft).await?
+        let freq_offset = i * cac_stride;
+        let left_spec = cac_data_to_complex(
+            &freq_data[freq_offset..freq_offset + ch_stride], freq_bins, n_frames,
         );
+        let right_spec = cac_data_to_complex(
+            &freq_data[freq_offset + ch_stride..freq_offset + cac_stride], freq_bins, n_frames,
+        );
+
+        let left_freq_wav = stft.inverse(&left_spec, padded_len)?;
+        let right_freq_wav = stft.inverse(&right_spec, padded_len)?;
+
+        let time_offset = i * time_stride;
+        let left_time = &time_data[time_offset..time_offset + n_samples];
+        let right_time = &time_data[time_offset + n_samples..time_offset + time_stride];
+
+        let left: Vec<f32> = left_freq_wav[..n_samples]
+            .iter()
+            .zip(left_time)
+            .map(|(f, t)| f + t)
+            .collect();
+        let right: Vec<f32> = right_freq_wav[..n_samples]
+            .iter()
+            .zip(right_time)
+            .map(|(f, t)| f + t)
+            .collect();
+
+        stems.push(Stem { id: stem_id, left, right });
     }
+
     Ok(stems)
 }
 
-/// Extract one stem by index from the model output, ISTFT, and combine freq + time.
+/// Extract one stem from model output using bulk GPU readback.
+///
+/// Reads the stem's freq and time data in 2 GPU→CPU transfers (instead of 3),
+/// then does CaC→complex→iSTFT on CPU.
 async fn extract_single_stem<B: Backend>(
     freq_out: &Tensor<B, 4>,  // [1, n_sources * 4, F, padded_T]
     time_out: &Tensor<B, 3>,  // [1, n_sources * 2, padded_T]
@@ -325,37 +390,46 @@ async fn extract_single_stem<B: Backend>(
     n_samples: usize,
     stft: &mut Stft,
 ) -> Result<Stem> {
-    // Freq: extract this stem's CaC [4, F, T] from [1, n_sources*4, F, padded_T]
-    let freq_s = freq_out.clone().narrow(1, stem_idx * 4, 4); // [1, 4, F, T]
-    let freq_s = freq_s.narrow(3, 0, n_frames); // trim time dim
-    let freq_s = freq_s.squeeze_dim::<3>(0); // [4, F, T]
+    let freq_bins = N_FFT / 2;
 
-    // Split into left [2, F, T] and right [2, F, T]
-    let left_cac = freq_s.clone().narrow(0, 0, 2);
-    let right_cac = freq_s.narrow(0, 2, 2);
+    // GPU: narrow to this stem's channels, trim time dim (no sync)
+    let freq_stem = freq_out.clone()
+        .narrow(1, stem_idx * 4, 4)  // [1, 4, F, padded_T]
+        .narrow(3, 0, n_frames)      // [1, 4, F, n_frames]
+        .squeeze_dim::<3>(0);        // [4, F, n_frames]
 
-    // CaC → complex spectrogram → ISTFT → waveform (reconstruct padded_len, then trim)
-    // Python _ispec reconstructs training_length samples, then forward() trims to original
-    let left_spec = cac_to_stft::<B>(&left_cac).await?;
-    let right_spec = cac_to_stft::<B>(&right_cac).await?;
+    let time_stem = time_out.clone()
+        .narrow(1, stem_idx * 2, 2)  // [1, 2, padded_T]
+        .narrow(2, 0, n_samples)     // [1, 2, n_samples]
+        .squeeze_dim::<2>(0);        // [2, n_samples]
+
+    // Bulk GPU→CPU readback (2 syncs instead of 3)
+    let freq_data: Vec<f32> = freq_stem
+        .reshape([4 * freq_bins * n_frames])
+        .to_data_async()
+        .await
+        .map_err(|e| DemucsError::Tensor(format!("freq read failed: {e}")))?
+        .to_vec()
+        .map_err(|e| DemucsError::Tensor(format!("freq extraction failed: {e}")))?;
+
+    let time_data: Vec<f32> = time_stem
+        .reshape([2 * n_samples])
+        .to_data_async()
+        .await
+        .map_err(|e| DemucsError::Tensor(format!("time read failed: {e}")))?
+        .to_vec()
+        .map_err(|e| DemucsError::Tensor(format!("time extraction failed: {e}")))?;
+
+    // CPU: CaC → complex → iSTFT → combine
+    let ch_stride = 2 * freq_bins * n_frames;
+    let left_spec = cac_data_to_complex(&freq_data[..ch_stride], freq_bins, n_frames);
+    let right_spec = cac_data_to_complex(&freq_data[ch_stride..], freq_bins, n_frames);
 
     let left_freq_wav = stft.inverse(&left_spec, padded_len)?;
     let right_freq_wav = stft.inverse(&right_spec, padded_len)?;
 
-    // Time: extract this stem's stereo [2] from [1, n_sources*2, padded_T], trim to n_samples
-    let time_data: Vec<f32> = time_out
-        .clone()
-        .narrow(1, stem_idx * 2, 2)
-        .narrow(2, 0, n_samples)
-        .reshape([2 * n_samples])
-        .to_data_async()
-        .await
-        .map_err(|e| DemucsError::Tensor(format!("time data async read failed: {}", e)))?
-        .to_vec()
-        .map_err(|e| DemucsError::Tensor(format!("time data extraction failed: {}", e)))?;
     let (left_time, right_time) = time_data.split_at(n_samples);
 
-    // Combine: freq waveform (trimmed to n_samples) + time waveform
     let left: Vec<f32> = left_freq_wav[..n_samples]
         .iter()
         .zip(left_time)
@@ -367,11 +441,7 @@ async fn extract_single_stem<B: Backend>(
         .map(|(f, t)| f + t)
         .collect();
 
-    Ok(Stem {
-        id: stem_id,
-        left,
-        right,
-    })
+    Ok(Stem { id: stem_id, left, right })
 }
 
 /// Compute the number of chunks needed for a given sample count.

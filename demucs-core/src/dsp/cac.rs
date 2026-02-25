@@ -33,27 +33,27 @@ pub fn stft_to_cac<B: Backend>(
     Tensor::from_data(TensorData::new(data, [2, freq_bins, num_frames]), device)
 }
 
-/// Convert a spectrogram from CaC format back to STFT format (flat `[frame × bin]` layout
-/// with complex values).
+/// Convert CaC data from a flat `[2, freq_bins, num_frames]` row-major f32 slice
+/// to STFT format (flat `[frame × bin]` layout with complex values).
 ///
-/// * `tensor` is a 3D tensor of shape `[2, freq_bins, num_frames]` where the first dimension
-///   separates real and imaginary parts, the second dimension is frequency bins (`n_fft/2`)
-///   and the third dimension is time frames.
+/// This is a pure CPU operation — no GPU tensors or async readback involved.
+/// Use this after bulk-reading model output tensors to avoid per-stem GPU sync points.
 ///
-/// Returns a flat vector of `num_frames × (freq_bins + 1)` complex values, with zeroed Nyquist
-/// bins appended to each frame.
-pub async fn cac_to_stft<B: Backend>(tensor: &Tensor<B, 3>) -> Result<Vec<Complex<f32>>> {
-    let [_, freq_bins, num_frames] = tensor.dims();
+/// * `data` is a flat `&[f32]` of length `2 * freq_bins * num_frames`, laid out as
+///   `[reals..., imags...]` where each half is `[freq_bins, num_frames]` row-major.
+/// * `freq_bins` is `n_fft / 2`.
+/// * `num_frames` is the number of time frames.
+///
+/// Returns a flat vector of `num_frames × (freq_bins + 1)` complex values, with zeroed
+/// Nyquist bins appended to each frame.
+pub fn cac_data_to_complex(
+    data: &[f32],
+    freq_bins: usize,
+    num_frames: usize,
+) -> Vec<Complex<f32>> {
     let bins = freq_bins + 1; // Add Nyquist bin
-
     let mut spectrogram = vec![Complex::new(0.0, 0.0); num_frames * bins];
 
-    let data: Vec<f32> = tensor
-        .to_data_async()
-        .await
-        .map_err(|e| DemucsError::Tensor(format!("cac_to_stft async read failed: {}", e)))?
-        .to_vec()
-        .map_err(|e| DemucsError::Tensor(format!("cac_to_stft conversion failed: {}", e)))?;
     let (reals, imags) = data.split_at(freq_bins * num_frames);
 
     reals
@@ -67,7 +67,29 @@ pub async fn cac_to_stft<B: Backend>(tensor: &Tensor<B, 3>) -> Result<Vec<Comple
             spectrogram[frame * bins + bin] = c;
         });
 
-    Ok(spectrogram)
+    spectrogram
+}
+
+/// Convert a spectrogram from CaC format back to STFT format (flat `[frame × bin]` layout
+/// with complex values).
+///
+/// * `tensor` is a 3D tensor of shape `[2, freq_bins, num_frames]` where the first dimension
+///   separates real and imaginary parts, the second dimension is frequency bins (`n_fft/2`)
+///   and the third dimension is time frames.
+///
+/// Returns a flat vector of `num_frames × (freq_bins + 1)` complex values, with zeroed Nyquist
+/// bins appended to each frame.
+pub async fn cac_to_stft<B: Backend>(tensor: &Tensor<B, 3>) -> Result<Vec<Complex<f32>>> {
+    let [_, freq_bins, num_frames] = tensor.dims();
+
+    let data: Vec<f32> = tensor
+        .to_data_async()
+        .await
+        .map_err(|e| DemucsError::Tensor(format!("cac_to_stft async read failed: {}", e)))?
+        .to_vec()
+        .map_err(|e| DemucsError::Tensor(format!("cac_to_stft conversion failed: {}", e)))?;
+
+    Ok(cac_data_to_complex(&data, freq_bins, num_frames))
 }
 
 #[cfg(test)]
