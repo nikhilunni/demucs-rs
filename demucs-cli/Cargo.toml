@@ -17,7 +17,7 @@ burn = { version = "0.20.1", features = ["wgpu", "autotune", "fusion"] }
 cubecl = { version = "0.9", default-features = false }
 clap = { version = "4", features = ["derive"] }
 hound = "3"
-ureq = "2"
+ureq = { version = "2", default-features = false, features = ["native-tls", "gzip"] }
 indicatif = "0.17"
 anyhow = "1"
 pollster = "0.4"
