@@ -436,10 +436,12 @@ pub async fn separate(
         .map_err(|e| JsError::new(&format!("Separation failed: {}", e)))?;
     wasm_log!("[wasm] Inference: {:.0}ms", perf_now() - t0);
 
-    let n_samples = left.len() as u32;
+    // Use actual stem output length (may differ from input length after
+    // round-trip resampling, e.g. 48kHz → 44.1kHz → 48kHz).
+    let n_samples = stems.first().map_or(left.len(), |s| s.left.len()) as u32;
 
     // Build flat buffer and collect names
-    let mut audio = Vec::with_capacity(stems.len() * 2 * left.len());
+    let mut audio = Vec::with_capacity(stems.len() * 2 * n_samples as usize);
     let mut stem_names = Vec::with_capacity(stems.len());
     for stem in &stems {
         // For non-fine-tuned models, filter to selected stems

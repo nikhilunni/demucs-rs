@@ -18,109 +18,179 @@ export interface MultiTrackPlayer {
 }
 
 /**
- * Manages synchronized playback of multiple audio stems.
+ * Manages synchronized playback of multiple audio stems using the Web Audio API.
  *
- * Each stem gets its own HTMLAudioElement. play/pause/seek are applied
- * to all elements simultaneously. Solo and mute use `audio.muted` so
- * playback stays in sync. A rAF loop corrects drift between elements.
+ * All stems are decoded into AudioBuffers and played through a single
+ * AudioContext, guaranteeing sample-accurate sync. Mute and solo are
+ * implemented via GainNodes (gain 0 or 1) so decoding is never interrupted.
  *
- * Solo and mute are mutually exclusive per track: soloing a track clears
- * its mute; muting a soloed track clears its solo.
+ * AudioBufferSourceNodes are one-shot, so pause/play recreates them at the
+ * saved offset. The rAF loop simply reads the AudioContext clock.
  */
 export function useMultiTrackPlayer(
   tracks: StemTrack[] | null,
 ): MultiTrackPlayer {
-  const audioMapRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  // Web Audio API refs
+  const ctxRef = useRef<AudioContext | null>(null);
+  const buffersRef = useRef<Map<string, AudioBuffer>>(new Map());
+  const gainsRef = useRef<Map<string, GainNode>>(new Map());
+  const sourcesRef = useRef<Map<string, AudioBufferSourceNode>>(new Map());
+
+  // Playback position tracking
+  const startedAtRef = useRef(0); // audioCtx.currentTime when playback last started
+  const offsetRef = useRef(0); // position in track (seconds) when playback last started
+  const playingRef = useRef(false);
+
   const rafRef = useRef(0);
 
-  // Refs are the source of truth; React state mirrors them for rendering.
+  // Mute/solo refs (source of truth)
   const mutedRef = useRef<Record<string, boolean>>({});
   const soloRef = useRef<string | null>(null);
 
+  // React state for rendering
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [muted, setMuted] = useState<Record<string, boolean>>({});
   const [solo, setSolo] = useState<string | null>(null);
 
-  /** Apply the correct muted state to every audio element. */
-  const syncAudioMuted = useCallback(() => {
+  /** Apply mute/solo by setting gain values. Instant, glitch-free. */
+  const syncGains = useCallback(() => {
     const s = soloRef.current;
     const m = mutedRef.current;
-    for (const [name, audio] of audioMapRef.current) {
-      audio.muted = s !== null ? name !== s : (m[name] ?? false);
+    for (const [name, gain] of gainsRef.current) {
+      const shouldMute = s !== null ? name !== s : (m[name] ?? false);
+      gain.gain.value = shouldMute ? 0 : 1;
     }
   }, []);
 
-  // Create / tear-down audio elements when tracks change
+  /** Stop all active source nodes, clearing onended handlers first. */
+  const stopSources = useCallback(() => {
+    for (const src of sourcesRef.current.values()) {
+      src.onended = null;
+      try {
+        src.stop();
+      } catch {
+        /* already stopped */
+      }
+    }
+    sourcesRef.current.clear();
+  }, []);
+
+  /** Create and start source nodes for all stems at the given offset. */
+  const startSources = useCallback(
+    (offset: number) => {
+      const ctx = ctxRef.current;
+      if (!ctx) return;
+
+      stopSources();
+
+      for (const [name, buffer] of buffersRef.current) {
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(gainsRef.current.get(name)!);
+        source.start(0, offset);
+        sourcesRef.current.set(name, source);
+      }
+
+      // Handle natural end of playback (only need one handler)
+      const firstSource = sourcesRef.current.values().next().value;
+      if (firstSource) {
+        firstSource.onended = () => {
+          if (playingRef.current) {
+            playingRef.current = false;
+            offsetRef.current = 0;
+            setIsPlaying(false);
+            setCurrentTime(0);
+          }
+        };
+      }
+
+      startedAtRef.current = ctx.currentTime;
+      offsetRef.current = offset;
+      playingRef.current = true;
+    },
+    [stopSources],
+  );
+
+  // Decode audio buffers when tracks change
   useEffect(() => {
-    const map = audioMapRef.current;
+    stopSources();
+    buffersRef.current.clear();
+    for (const gain of gainsRef.current.values()) gain.disconnect();
+    gainsRef.current.clear();
 
-    // Cleanup old elements
-    for (const audio of map.values()) {
-      audio.pause();
-      audio.src = "";
-    }
-    map.clear();
-
-    if (!tracks || tracks.length === 0) {
-      setIsPlaying(false);
-      setCurrentTime(0);
-      setDuration(0);
-      setMuted({});
-      setSolo(null);
-      mutedRef.current = {};
-      soloRef.current = null;
-      return;
-    }
-
-    const initialMuted: Record<string, boolean> = {};
-    for (const track of tracks) {
-      const audio = new Audio(track.url);
-      audio.preload = "auto";
-      initialMuted[track.name] = false;
-      map.set(track.name, audio);
-    }
-    mutedRef.current = initialMuted;
+    playingRef.current = false;
+    offsetRef.current = 0;
+    startedAtRef.current = 0;
+    mutedRef.current = {};
     soloRef.current = null;
-    setMuted(initialMuted);
+
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setMuted({});
     setSolo(null);
 
-    // Get duration from first track once loaded
-    const first = map.values().next().value;
-    if (first) {
-      const onMeta = () => setDuration(first.duration);
-      first.addEventListener("loadedmetadata", onMeta);
+    if (!tracks || tracks.length === 0) return;
 
-      const onEnded = () => setIsPlaying(false);
-      first.addEventListener("ended", onEnded);
+    // Create AudioContext on first use
+    if (!ctxRef.current) {
+      ctxRef.current = new AudioContext();
     }
+    const ctx = ctxRef.current;
+
+    let cancelled = false;
+
+    (async () => {
+      const initialMuted: Record<string, boolean> = {};
+
+      // Decode all tracks in parallel
+      const decoded = await Promise.all(
+        tracks.map(async (track) => {
+          const resp = await fetch(track.url);
+          const arrayBuf = await resp.arrayBuffer();
+          const audioBuf = await ctx.decodeAudioData(arrayBuf);
+          return { name: track.name, buffer: audioBuf };
+        }),
+      );
+
+      if (cancelled) return;
+
+      for (const { name, buffer } of decoded) {
+        buffersRef.current.set(name, buffer);
+
+        // Create persistent gain node for each stem
+        const gain = ctx.createGain();
+        gain.connect(ctx.destination);
+        gainsRef.current.set(name, gain);
+
+        initialMuted[name] = false;
+      }
+
+      mutedRef.current = initialMuted;
+      setMuted(initialMuted);
+
+      // Duration from first buffer
+      const firstBuf = buffersRef.current.values().next().value;
+      if (firstBuf) setDuration(firstBuf.duration);
+    })();
 
     return () => {
-      for (const audio of map.values()) {
-        audio.pause();
-        audio.src = "";
-      }
-      map.clear();
+      cancelled = true;
     };
-  }, [tracks]);
+  }, [tracks, stopSources]);
 
-  // rAF loop: update currentTime + correct drift between elements
+  // rAF loop: read the shared AudioContext clock (no drift correction needed)
   useEffect(() => {
     if (!isPlaying) return;
 
     const tick = () => {
-      const entries = Array.from(audioMapRef.current.values());
-      const leader = entries[0];
-      if (leader) {
-        const t = leader.currentTime;
+      const ctx = ctxRef.current;
+      if (ctx && playingRef.current) {
+        const t =
+          offsetRef.current + (ctx.currentTime - startedAtRef.current);
         setCurrentTime(t);
-        // Snap any element that has drifted >50 ms from the leader
-        for (let i = 1; i < entries.length; i++) {
-          if (Math.abs(entries[i].currentTime - t) > 0.05) {
-            entries[i].currentTime = t;
-          }
-        }
       }
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -130,69 +200,95 @@ export function useMultiTrackPlayer(
   }, [isPlaying]);
 
   const toggleAll = useCallback(() => {
-    const map = audioMapRef.current;
-    if (map.size === 0) return;
+    const ctx = ctxRef.current;
+    if (!ctx || buffersRef.current.size === 0) return;
 
-    const first = map.values().next().value!;
-    if (first.paused) {
-      // Sync all elements to the leader's time before starting
-      const t = first.currentTime;
-      for (const audio of map.values()) {
-        audio.currentTime = t;
-        audio.play();
-      }
-      setIsPlaying(true);
-    } else {
-      for (const audio of map.values()) audio.pause();
+    // Resume context if suspended (browser autoplay policy)
+    if (ctx.state === "suspended") ctx.resume();
+
+    if (playingRef.current) {
+      // Pause: record position, stop sources
+      const elapsed = ctx.currentTime - startedAtRef.current;
+      offsetRef.current = offsetRef.current + elapsed;
+      stopSources();
+      playingRef.current = false;
       setIsPlaying(false);
-    }
-  }, []);
-
-  const playSolo = useCallback((name: string) => {
-    const newSolo = soloRef.current === name ? null : name;
-    soloRef.current = newSolo;
-    setSolo(newSolo);
-
-    // Solo & mute are exclusive per track: clear mute on the soloed track
-    if (newSolo) {
-      mutedRef.current = { ...mutedRef.current, [name]: false };
-      setMuted({ ...mutedRef.current });
-    }
-
-    syncAudioMuted();
-
-    // Auto-play when entering solo
-    const first = audioMapRef.current.values().next().value;
-    if (first?.paused) {
-      const t = first.currentTime;
-      for (const audio of audioMapRef.current.values()) {
-        audio.currentTime = t;
-        audio.play();
-      }
+    } else {
+      // Play from saved offset
+      startSources(offsetRef.current);
+      syncGains();
       setIsPlaying(true);
     }
-  }, [syncAudioMuted]);
+  }, [stopSources, startSources, syncGains]);
 
-  const toggleMute = useCallback((name: string) => {
-    const wasMuted = mutedRef.current[name] ?? false;
-    mutedRef.current = { ...mutedRef.current, [name]: !wasMuted };
-    setMuted({ ...mutedRef.current });
+  const playSolo = useCallback(
+    (name: string) => {
+      const ctx = ctxRef.current;
+      if (!ctx) return;
+      if (ctx.state === "suspended") ctx.resume();
 
-    // Muting the currently-soloed track clears solo
-    if (!wasMuted && soloRef.current === name) {
-      soloRef.current = null;
-      setSolo(null);
-    }
+      const newSolo = soloRef.current === name ? null : name;
+      soloRef.current = newSolo;
+      setSolo(newSolo);
 
-    syncAudioMuted();
-  }, [syncAudioMuted]);
+      // Solo & mute are exclusive per track: clear mute on the soloed track
+      if (newSolo) {
+        mutedRef.current = { ...mutedRef.current, [name]: false };
+        setMuted({ ...mutedRef.current });
+      }
 
-  const seek = useCallback((time: number) => {
-    for (const audio of audioMapRef.current.values()) {
-      audio.currentTime = time;
-    }
-    setCurrentTime(time);
-  }, []);
+      syncGains();
 
-  return { isPlaying, currentTime, duration, muted, solo, toggleAll, playSolo, toggleMute, seek };
+      // Auto-play when entering solo
+      if (!playingRef.current) {
+        startSources(offsetRef.current);
+        syncGains();
+        setIsPlaying(true);
+      }
+    },
+    [syncGains, startSources],
+  );
+
+  const toggleMute = useCallback(
+    (name: string) => {
+      const wasMuted = mutedRef.current[name] ?? false;
+      mutedRef.current = { ...mutedRef.current, [name]: !wasMuted };
+      setMuted({ ...mutedRef.current });
+
+      // Muting the currently-soloed track clears solo
+      if (!wasMuted && soloRef.current === name) {
+        soloRef.current = null;
+        setSolo(null);
+      }
+
+      syncGains();
+    },
+    [syncGains],
+  );
+
+  const seek = useCallback(
+    (time: number) => {
+      if (playingRef.current) {
+        // Stop and restart at new position
+        startSources(time);
+        syncGains();
+      } else {
+        offsetRef.current = time;
+      }
+      setCurrentTime(time);
+    },
+    [startSources, syncGains],
+  );
+
+  return {
+    isPlaying,
+    currentTime,
+    duration,
+    muted,
+    solo,
+    toggleAll,
+    playSolo,
+    toggleMute,
+    seek,
+  };
 }

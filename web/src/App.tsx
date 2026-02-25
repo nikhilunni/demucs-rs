@@ -107,7 +107,7 @@ export default function App() {
       const url = URL.createObjectURL(file);
 
       const arrayBuf = await file.arrayBuffer();
-      const audioCtx = new AudioContext();
+      const audioCtx = new AudioContext({ sampleRate: 44100 });
       const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
       const left = audioBuf.getChannelData(0);
       // Use right channel if stereo, otherwise duplicate mono
