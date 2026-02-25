@@ -1172,28 +1172,6 @@ body {
   box-shadow: 0 0 8px rgba(124, 111, 240, 0.4);
 }
 
-/* ── GPU processing mode — staggered wave animation ─── */
-.mp--gpu .mp-node--active .mp-node__inner {
-  animation-delay: var(--stagger, 0s);
-}
-
-/* Indeterminate shimmer on progress bar while GPU is working */
-.mp-bar__fill--gpu {
-  background: linear-gradient(
-    90deg,
-    var(--accent-cool) 0%,
-    var(--accent) 50%,
-    var(--accent-cool) 100%
-  );
-  background-size: 200% 100%;
-  animation: gpu-bar-shimmer 2s ease-in-out infinite;
-  transition: none;
-}
-
-@keyframes gpu-bar-shimmer {
-  0%   { background-position: 100% 0; }
-  100% { background-position: -100% 0; }
-}
 
 /* ══════════════════════════════════════════════════════════════
    Stem Results

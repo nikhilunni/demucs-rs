@@ -103,9 +103,6 @@ export function reduceProgress(
 
 const NUM_LAYERS = 4;
 
-/** Stagger step (seconds) between architecture nodes during GPU processing wave. */
-const STAGGER_STEP = 0.15;
-
 type NodeStatus = "done" | "active" | "pending";
 
 interface Props {
@@ -113,12 +110,15 @@ interface Props {
 }
 
 export function ModelProgress({ progress }: Props) {
-  const { chunk, freqEnc, timeEnc, transformer, freqDec, timeDec, active } =
-    progress;
-
-  // GPU ops are pipelined — progress events fire instantly as work is queued,
-  // so always show all nodes pulsing once a chunk is being processed.
-  const gpuProcessing = active != null;
+  const {
+    chunk,
+    freqEnc,
+    timeEnc,
+    transformer,
+    freqDec,
+    timeDec,
+    active,
+  } = progress;
 
   // Chunk progress
   const chunkTotal = chunk?.total ?? 1;
@@ -126,44 +126,46 @@ export function ModelProgress({ progress }: Props) {
   const chunkPct = Math.round((chunksDone / chunkTotal) * 100);
   const isChunked = chunkTotal > 1;
 
-  // Node status helpers — when GPU is processing, show all as active
+  // Node status helpers
   const encStatus = (domain: "freq" | "time", layer: number): NodeStatus => {
-    if (gpuProcessing) return "active";
     const done = domain === "freq" ? freqEnc : timeEnc;
-    const isActive =
-      domain === "freq" ? active === "freq_enc" : active === "time_enc";
+    const isActive = domain === "freq" ? active === "freq_enc" : active === "time_enc";
     if (layer < done) return "done";
     if (layer === done && isActive) return "active";
     return "pending";
   };
 
-  const xfmrStatus: NodeStatus = gpuProcessing
-    ? "active"
-    : transformer
-      ? "done"
-      : active === "transformer"
-        ? "active"
-        : "pending";
+  const xfmrStatus: NodeStatus = transformer
+    ? "done"
+    : active === "transformer"
+      ? "active"
+      : "pending";
 
   const decStatus = (domain: "freq" | "time", layer: number): NodeStatus => {
-    if (gpuProcessing) return "active";
     const done = domain === "freq" ? freqDec : timeDec;
-    const isActive =
-      domain === "freq" ? active === "freq_dec" : active === "time_dec";
+    const isActive = domain === "freq" ? active === "freq_dec" : active === "time_dec";
     if (layer < done) return "done";
     if (layer === done && isActive) return "active";
     return "pending";
   };
 
   // Stage label
-  const stageLabel = gpuProcessing
-    ? "Processing with WebGPU\u2026"
-    : chunksDone > 0
-      ? "Waiting..."
-      : "Starting...";
+  const stageLabel =
+    active === "stems"
+      ? "Extracting stems"
+      : active != null
+        ? "Processing with WebGPU\u2026"
+        : chunksDone > 0
+          ? "Waiting..."
+          : "Starting...";
+
+  // Completed stages for progress bar
+  const doneStages = freqEnc + timeEnc + (transformer ? 1 : 0) + freqDec + timeDec;
+  const totalStages = NUM_LAYERS * 4 + 1; // 4 domains × 4 layers + transformer
+  const stagePct = Math.round((doneStages / totalStages) * 100);
 
   return (
-    <div className={`mp${gpuProcessing ? " mp--gpu" : ""}`}>
+    <div className="mp">
       {/* Chunk progress */}
       {isChunked && (
         <div className="mp-chunk">
@@ -188,18 +190,8 @@ export function ModelProgress({ progress }: Props) {
         <div className="mp-section">
           <div className="mp-section__label">Encoder</div>
           <div className="mp-tracks">
-            <Track
-              domain="freq"
-              layers={NUM_LAYERS}
-              statusFn={(i) => encStatus("freq", i)}
-              staggerBase={gpuProcessing ? 0 : undefined}
-            />
-            <Track
-              domain="time"
-              layers={NUM_LAYERS}
-              statusFn={(i) => encStatus("time", i)}
-              staggerBase={gpuProcessing ? 0 : undefined}
-            />
+            <Track domain="freq" layers={NUM_LAYERS} statusFn={(i) => encStatus("freq", i)} />
+            <Track domain="time" layers={NUM_LAYERS} statusFn={(i) => encStatus("time", i)} />
           </div>
         </div>
 
@@ -207,16 +199,7 @@ export function ModelProgress({ progress }: Props) {
         <div className="mp-section mp-section--xfmr">
           <div className="mp-section__label"></div>
           <div className="mp-xfmr">
-            <div
-              className={`mp-node mp-node--xfmr mp-node--${xfmrStatus}`}
-              style={
-                gpuProcessing
-                  ? ({
-                      "--stagger": `${NUM_LAYERS * STAGGER_STEP}s`,
-                    } as React.CSSProperties)
-                  : undefined
-              }
-            >
+            <div className={`mp-node mp-node--xfmr mp-node--${xfmrStatus}`}>
               <div className="mp-node__inner" />
               <span className="mp-node__label">Cross-Attention</span>
             </div>
@@ -227,22 +210,8 @@ export function ModelProgress({ progress }: Props) {
         <div className="mp-section">
           <div className="mp-section__label">Decoder</div>
           <div className="mp-tracks">
-            <Track
-              domain="freq"
-              layers={NUM_LAYERS}
-              statusFn={(i) => decStatus("freq", i)}
-              staggerBase={
-                gpuProcessing ? (NUM_LAYERS + 1) * STAGGER_STEP : undefined
-              }
-            />
-            <Track
-              domain="time"
-              layers={NUM_LAYERS}
-              statusFn={(i) => decStatus("time", i)}
-              staggerBase={
-                gpuProcessing ? (NUM_LAYERS + 1) * STAGGER_STEP : undefined
-              }
-            />
+            <Track domain="freq" layers={NUM_LAYERS} statusFn={(i) => decStatus("freq", i)} />
+            <Track domain="time" layers={NUM_LAYERS} statusFn={(i) => decStatus("time", i)} />
           </div>
         </div>
       </div>
@@ -250,14 +219,12 @@ export function ModelProgress({ progress }: Props) {
       {/* Detail line */}
       <div className="mp-detail">
         <span className="mp-detail__stage">{stageLabel}</span>
+        <span className="mp-detail__count">{doneStages}/{totalStages}</span>
       </div>
 
       {/* Overall progress bar */}
       <div className="mp-bar">
-        <div
-          className={`mp-bar__fill${gpuProcessing ? " mp-bar__fill--gpu" : ""}`}
-          style={{ width: gpuProcessing ? "100%" : "0%" }}
-        />
+        <div className="mp-bar__fill" style={{ width: `${stagePct}%` }} />
       </div>
     </div>
   );
@@ -269,29 +236,17 @@ function Track({
   domain,
   layers,
   statusFn,
-  staggerBase,
 }: {
   domain: "freq" | "time";
   layers: number;
   statusFn: (i: number) => NodeStatus;
-  staggerBase?: number;
 }) {
   return (
     <div className={`mp-track mp-track--${domain}`}>
       {Array.from({ length: layers }, (_, i) => {
         const status = statusFn(i);
-        const style =
-          staggerBase != null
-            ? ({
-                "--stagger": `${staggerBase + i * STAGGER_STEP}s`,
-              } as React.CSSProperties)
-            : undefined;
         return (
-          <div
-            key={i}
-            className={`mp-node mp-node--${status} mp-node--${domain}`}
-            style={style}
-          >
+          <div key={i} className={`mp-node mp-node--${status} mp-node--${domain}`}>
             <div className="mp-node__inner" />
           </div>
         );
