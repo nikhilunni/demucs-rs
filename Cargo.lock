@@ -2041,7 +2041,6 @@ version = "0.1.0"
 dependencies = [
  "burn",
  "console_error_panic_hook",
- "cubecl",
  "demucs-core",
  "getrandom 0.3.4",
  "js-sys",
