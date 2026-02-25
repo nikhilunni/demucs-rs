@@ -67,12 +67,11 @@ pub(crate) struct TEncLayer<B: Backend> {
 
 impl<B: Backend> TEncLayer<B> {
     pub(crate) fn init(chin: usize, chout: usize, device: &B::Device) -> Self {
-        // Python uses F.pad(pad, pad) + Conv1d(padding=pad) which together
-        // produce ceil(input / stride) output frames. We achieve the same
-        // with Conv1d(padding=pad+1) where pad = kernel_size / 4.
+        // Python: Conv1d(kernel_size=8, stride=4, padding=2)
+        // with a conditional right-pad in forward() when input % stride != 0.
         let conv = Conv1dConfig::new(chin, chout, KERNEL_SIZE)
             .with_stride(STRIDE)
-            .with_padding(PaddingConfig1d::Explicit(KERNEL_SIZE / 4 + 1))
+            .with_padding(PaddingConfig1d::Explicit(KERNEL_SIZE / 4))
             .init(device);
         let dconv = DConv::init(chout, device);
         let rewrite = Conv1dConfig::new(chout, 2 * chout, 1).init(device);
@@ -81,6 +80,16 @@ impl<B: Backend> TEncLayer<B> {
     }
 
     pub(crate) fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
+        // Right-pad so input length is divisible by stride (matching Python HEncLayer)
+        let le = x.dims()[2];
+        let x = if le % STRIDE != 0 {
+            let pad_right = STRIDE - (le % STRIDE);
+            let [b, c, _t] = x.dims();
+            let zeros = Tensor::zeros([b, c, pad_right], &x.device());
+            Tensor::cat(vec![x, zeros], 2)
+        } else {
+            x
+        };
         let x = self.conv.forward(x);
         let x = activation::gelu(x);
         let x = self.dconv.forward(x);
