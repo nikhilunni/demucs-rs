@@ -70,7 +70,13 @@ impl TensorStore {
                 }
             };
 
-            tensors.insert(key, StoredTensor { data: float_data, shape });
+            tensors.insert(
+                key,
+                StoredTensor {
+                    data: float_data,
+                    shape,
+                },
+            );
         }
 
         if tensors.is_empty() {
@@ -93,6 +99,11 @@ impl TensorStore {
         self.tensors.len()
     }
 
+    /// Returns `true` if no tensors remain.
+    pub fn is_empty(&self) -> bool {
+        self.tensors.is_empty()
+    }
+
     /// Remove and discard all keys that start with `prefix`.
     /// Used to skip weights we intentionally don't load (e.g. decoder DConv).
     pub fn skip_prefix(&mut self, prefix: &str) {
@@ -111,13 +122,16 @@ impl TensorStore {
 /// Does NOT read tensor data — only checks the header JSON.
 /// Returns a Vec of counts (one per signature).
 pub fn validate_signatures(data: &[u8], signatures: &[&str]) -> Result<Vec<usize>, WeightError> {
-    let st = SafeTensors::deserialize(data)
-        .map_err(|e| WeightError::SafetensorsError(e.to_string()))?;
+    let st =
+        SafeTensors::deserialize(data).map_err(|e| WeightError::SafetensorsError(e.to_string()))?;
 
     let mut counts = Vec::with_capacity(signatures.len());
     for sig in signatures {
         let prefix = format!("{}.", sig);
-        let count = st.iter().filter(|(name, _)| name.starts_with(&prefix)).count();
+        let count = st
+            .iter()
+            .filter(|(name, _)| name.starts_with(&prefix))
+            .count();
         if count == 0 {
             return Err(WeightError::NoTensorsFound(sig.to_string()));
         }
@@ -140,7 +154,7 @@ pub fn split_dim0(t: &StoredTensor, n_chunks: usize) -> Result<Vec<StoredTensor>
         ));
     }
     let dim0 = t.shape[0];
-    if dim0 % n_chunks != 0 {
+    if !dim0.is_multiple_of(n_chunks) {
         return Err(WeightError::ShapeMismatch(format!(
             "dim0={} not divisible by n_chunks={}",
             dim0, n_chunks
@@ -210,32 +224,33 @@ mod tests {
         let views: Vec<(String, safetensors::tensor::TensorView<'_>)> = tensors
             .iter()
             .map(|(name, shape, data)| {
-                let bytes: &[u8] = bytemuck_cast_f32_to_u8(data);
+                let bytes: &[u8] = cast_f32_to_u8(data);
                 (
                     name.to_string(),
-                    safetensors::tensor::TensorView::new(Dtype::F32, shape.to_vec(), bytes).unwrap(),
+                    safetensors::tensor::TensorView::new(Dtype::F32, shape.to_vec(), bytes)
+                        .unwrap(),
                 )
             })
             .collect();
 
-        let views_ref: Vec<(&str, safetensors::tensor::TensorView<'_>)> = views
-            .iter()
-            .map(|(n, v)| (n.as_str(), v.clone()))
-            .collect();
+        let views_ref: Vec<(&str, safetensors::tensor::TensorView<'_>)> =
+            views.iter().map(|(n, v)| (n.as_str(), v.clone())).collect();
 
         serialize(views_ref, &None).unwrap()
     }
 
-    fn bytemuck_cast_f32_to_u8(data: &[f32]) -> &[u8] {
-        unsafe {
-            std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4)
-        }
+    fn cast_f32_to_u8(data: &[f32]) -> &[u8] {
+        bytemuck::cast_slice(data)
     }
 
     #[test]
     fn parse_basic_safetensors() {
         let data = make_safetensors(&[
-            ("sig1.layer.weight", &[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            (
+                "sig1.layer.weight",
+                &[2, 3],
+                &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            ),
             ("sig1.layer.bias", &[2], &[0.1, 0.2]),
             ("other.ignored", &[1], &[99.0]),
         ]);

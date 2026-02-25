@@ -20,6 +20,18 @@ impl StemId {
             StemId::Piano => "piano",
         }
     }
+
+    pub fn parse(s: &str) -> Option<StemId> {
+        match s {
+            "drums" => Some(StemId::Drums),
+            "bass" => Some(StemId::Bass),
+            "other" => Some(StemId::Other),
+            "vocals" => Some(StemId::Vocals),
+            "guitar" => Some(StemId::Guitar),
+            "piano" => Some(StemId::Piano),
+            _ => None,
+        }
+    }
 }
 
 /// Metadata for a model variant — shared source of truth between Rust and JS.

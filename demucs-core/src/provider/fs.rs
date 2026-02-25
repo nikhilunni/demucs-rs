@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use crate::model::metadata::ModelInfo;
 use super::{ModelProvider, ProviderError};
+use crate::model::metadata::ModelInfo;
 
 /// Filesystem-based model cache.
 /// macOS: ~/Library/Caches/demucs-rs/

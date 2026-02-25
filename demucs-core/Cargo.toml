@@ -24,3 +24,4 @@ dirs = "5"
 burn = { version = "0.20.1", features = ["ndarray"] }
 safetensors = "0.5"
 pollster = "0.4"
+bytemuck = "1"

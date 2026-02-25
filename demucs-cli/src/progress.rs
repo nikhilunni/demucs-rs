@@ -40,7 +40,8 @@ impl ForwardListener for CliListener {
                 self.pb.inc(1);
             }
             ForwardEvent::ChunkStarted { index, total } => {
-                self.pb.set_message(format!("chunk {}/{}", index + 1, total));
+                self.pb
+                    .set_message(format!("chunk {}/{}", index + 1, total));
             }
             ForwardEvent::ChunkDone { index, total } => {
                 if index + 1 == total {

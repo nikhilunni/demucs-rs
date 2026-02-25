@@ -173,8 +173,7 @@ impl<B: Backend> HTDemucs<B> {
         // Apply freq_emb AFTER encoder[0], BEFORE saving skip
         // Python: x = encode(x); x = x + emb; saved.append(x)
         let [_, _, fr, _] = freq.dims();
-        let frs = Tensor::<B, 1, Int>::arange(0..fr as i64, &device)
-            .unsqueeze_dim::<2>(0); // [1, Fr]
+        let frs = Tensor::<B, 1, Int>::arange(0..fr as i64, &device).unsqueeze_dim::<2>(0); // [1, Fr]
         let emb = self.freq_emb.forward(frs); // [1, Fr, chout]
         let emb = emb
             .permute([0, 2, 1]) // [1, chout, Fr]
@@ -286,12 +285,8 @@ impl<B: Backend> HTDemucs<B> {
         let freq_std = freq_var.sqrt();
 
         // Reshape to [B, 1, 1, 1] for broadcasting
-        let freq_mean = freq_mean
-            .unsqueeze_dim::<3>(2)
-            .unsqueeze_dim::<4>(3);
-        let freq_std = freq_std
-            .unsqueeze_dim::<3>(2)
-            .unsqueeze_dim::<4>(3);
+        let freq_mean = freq_mean.unsqueeze_dim::<3>(2).unsqueeze_dim::<4>(3);
+        let freq_std = freq_std.unsqueeze_dim::<3>(2).unsqueeze_dim::<4>(3);
 
         let freq = (freq - freq_mean.clone()) / (freq_std.clone() + 1e-5);
         (freq, freq_mean, freq_std)
@@ -317,7 +312,9 @@ mod tests {
     use burn::backend::NdArray;
     use burn::module::Param;
     use burn::nn::attention::MultiHeadAttentionConfig;
-    use burn::nn::conv::{Conv1dConfig, Conv2dConfig, ConvTranspose1dConfig, ConvTranspose2dConfig};
+    use burn::nn::conv::{
+        Conv1dConfig, Conv2dConfig, ConvTranspose1dConfig, ConvTranspose2dConfig,
+    };
     use burn::nn::{
         EmbeddingConfig, GroupNormConfig, LayerNormConfig, LinearConfig, PaddingConfig1d,
         PaddingConfig2d, GLU,

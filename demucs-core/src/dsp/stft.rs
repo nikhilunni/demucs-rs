@@ -53,7 +53,7 @@ impl Stft {
     /// `[frame_0_bin_0, ..., frame_0_bin_F, frame_1_bin_0, ...]`
     pub fn forward(&mut self, samples: &[f32]) -> Result<Vec<Complex<f32>>> {
         let hl = self.hop_length;
-        let le = div_ceil(samples.len(), hl); // target frame count
+        let le = samples.len().div_ceil(hl); // target frame count
 
         // 1. Custom padding matching _spec
         let spec_pad = hl / 2 * 3; // 1536
@@ -203,10 +203,6 @@ fn reflect_pad(samples: &[f32], left: usize, right: usize) -> Vec<f32> {
     padded
 }
 
-fn div_ceil(a: usize, b: usize) -> usize {
-    (a + b - 1) / b
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,7 +234,7 @@ mod tests {
 
         let output = stft.forward(&samples).unwrap();
 
-        let le = div_ceil(num_samples, hop); // 336
+        let le = num_samples.div_ceil(hop); // 336
         let bins = n_fft / 2; // 2048
         assert_eq!(output.len(), le * bins);
         assert_eq!(le, 336);

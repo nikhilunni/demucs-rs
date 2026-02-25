@@ -13,11 +13,7 @@ pub fn fetch(info: &ModelInfo) -> Result<Vec<u8>> {
         .with_context(|| format!("Failed to download model from {}", url))?;
 
     if response.status() != 200 {
-        bail!(
-            "HTTP {} when downloading {}",
-            response.status(),
-            url
-        );
+        bail!("HTTP {} when downloading {}", response.status(), url);
     }
 
     // Use Content-Length if available, otherwise estimate from metadata.

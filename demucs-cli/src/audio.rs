@@ -33,7 +33,10 @@ pub fn read_wav(path: &Path) -> Result<(Vec<f32>, Vec<f32>, u32)> {
 }
 
 /// Read interleaved samples from a WAV reader, normalizing to f32 in [-1, 1].
-fn read_samples(reader: WavReader<std::io::BufReader<std::fs::File>>, spec: WavSpec) -> Result<Vec<f32>> {
+fn read_samples(
+    reader: WavReader<std::io::BufReader<std::fs::File>>,
+    spec: WavSpec,
+) -> Result<Vec<f32>> {
     match spec.sample_format {
         SampleFormat::Float => {
             let samples: hound::Result<Vec<f32>> = reader.into_samples::<f32>().collect();

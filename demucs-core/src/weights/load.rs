@@ -326,15 +326,15 @@ fn load_mha<B: Backend>(
     // 2. Split in_proj_bias [3*d] → Q, K, V each [d]
     let in_proj_b = store.take(&format!("{}.in_proj_bias", prefix))?;
     let mut b_chunks = split_1d(&in_proj_b, 3)?;
-    let v_b = b_chunks.pop().ok_or_else(|| {
-        WeightError::ShapeMismatch("in_proj_bias split: missing V chunk".into())
-    })?;
-    let k_b = b_chunks.pop().ok_or_else(|| {
-        WeightError::ShapeMismatch("in_proj_bias split: missing K chunk".into())
-    })?;
-    let q_b = b_chunks.pop().ok_or_else(|| {
-        WeightError::ShapeMismatch("in_proj_bias split: missing Q chunk".into())
-    })?;
+    let v_b = b_chunks
+        .pop()
+        .ok_or_else(|| WeightError::ShapeMismatch("in_proj_bias split: missing V chunk".into()))?;
+    let k_b = b_chunks
+        .pop()
+        .ok_or_else(|| WeightError::ShapeMismatch("in_proj_bias split: missing K chunk".into()))?;
+    let q_b = b_chunks
+        .pop()
+        .ok_or_else(|| WeightError::ShapeMismatch("in_proj_bias split: missing Q chunk".into()))?;
 
     attn.query.bias = Some(Param::from_tensor(Tensor::from_data(
         to_tensor_data(q_b),
@@ -777,9 +777,7 @@ mod tests {
         let views: Vec<(String, safetensors::tensor::TensorView<'_>)> = tensors
             .iter()
             .map(|(name, shape, data)| {
-                let bytes: &[u8] = unsafe {
-                    std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4)
-                };
+                let bytes: &[u8] = bytemuck::cast_slice(data);
                 (
                     name.to_string(),
                     safetensors::tensor::TensorView::new(

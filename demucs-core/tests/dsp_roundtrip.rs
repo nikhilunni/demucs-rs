@@ -139,7 +139,7 @@ fn full_stereo_dsp_roundtrip() {
     let bins = N_FFT / 2;
     let n_frames = left_spec.len() / bins;
 
-    let left_cac = stft_to_cac::<B>(&left_spec, N_FFT, &device);  // [2, F, T]
+    let left_cac = stft_to_cac::<B>(&left_spec, N_FFT, &device); // [2, F, T]
     let right_cac = stft_to_cac::<B>(&right_spec, N_FFT, &device); // [2, F, T]
     let freq: Tensor<B, 4> = Tensor::cat(vec![left_cac, right_cac], 0) // [4, F, T]
         .unsqueeze_dim(0); // [1, 4, F, T]
@@ -153,12 +153,22 @@ fn full_stereo_dsp_roundtrip() {
     let freq_s = freq.narrow(3, 0, n_frames); // trim time dim
     let freq_s = freq_s.squeeze_dim::<3>(0); // [4, F, T]
 
-    let left_cac_out = freq_s.clone().narrow(0, 0, 2);  // [2, F, T]
-    let right_cac_out = freq_s.narrow(0, 2, 2);          // [2, F, T]
+    let left_cac_out = freq_s.clone().narrow(0, 0, 2); // [2, F, T]
+    let right_cac_out = freq_s.narrow(0, 2, 2); // [2, F, T]
 
     // iSTFT reconstructs padded_len, then we trim to n_samples
-    let left_recon = stft.inverse(&pollster::block_on(cac_to_stft::<B>(&left_cac_out)).unwrap(), padded_len).unwrap();
-    let right_recon = stft.inverse(&pollster::block_on(cac_to_stft::<B>(&right_cac_out)).unwrap(), padded_len).unwrap();
+    let left_recon = stft
+        .inverse(
+            &pollster::block_on(cac_to_stft::<B>(&left_cac_out)).unwrap(),
+            padded_len,
+        )
+        .unwrap();
+    let right_recon = stft
+        .inverse(
+            &pollster::block_on(cac_to_stft::<B>(&right_cac_out)).unwrap(),
+            padded_len,
+        )
+        .unwrap();
 
     // ── Verify interior ────────────────────────────────────────────────
     assert_eq!(left_recon.len(), padded_len);

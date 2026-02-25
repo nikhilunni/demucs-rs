@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { spectrogramDisplay } from "../design/tokens";
-
-function fmt(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
+import { formatTime as fmt } from "../dsp/format";
 
 interface Props {
   image: HTMLCanvasElement;
@@ -21,6 +16,7 @@ type DragAction = "create" | "resize-left" | "resize-right" | "move";
 
 const DRAG_THRESHOLD = 5; // px to distinguish click from drag
 const MIN_SELECTION = 0.5; // seconds
+const HANDLE_ZONE = 10; // px — resize handle hit area
 
 export function SpectrogramView({
   image,
@@ -104,8 +100,6 @@ export function SpectrogramView({
       const rect = wrapRef.current.getBoundingClientRect();
       const leftPx = (activeRange[0] / duration) * rect.width + rect.left;
       const rightPx = (activeRange[1] / duration) * rect.width + rect.left;
-      const HANDLE_ZONE = 10; // px
-
       if (Math.abs(clientX - leftPx) <= HANDLE_ZONE) {
         return { action: "resize-left", range: activeRange };
       }
@@ -238,8 +232,6 @@ export function SpectrogramView({
       const rect = wrapRef.current.getBoundingClientRect();
       const leftPx = (activeRange[0] / duration) * rect.width + rect.left;
       const rightPx = (activeRange[1] / duration) * rect.width + rect.left;
-      const HANDLE_ZONE = 10;
-
       if (
         Math.abs(e.clientX - leftPx) <= HANDLE_ZONE ||
         Math.abs(e.clientX - rightPx) <= HANDLE_ZONE

@@ -2027,6 +2027,7 @@ name = "demucs-core"
 version = "0.1.0"
 dependencies = [
  "burn",
+ "bytemuck",
  "dirs 5.0.1",
  "half",
  "pollster",

@@ -306,18 +306,6 @@ impl SeparationResult {
     }
 }
 
-fn parse_stem_id(s: &str) -> Option<StemId> {
-    match s {
-        "drums" => Some(StemId::Drums),
-        "bass" => Some(StemId::Bass),
-        "other" => Some(StemId::Other),
-        "vocals" => Some(StemId::Vocals),
-        "guitar" => Some(StemId::Guitar),
-        "piano" => Some(StemId::Piano),
-        _ => None,
-    }
-}
-
 /// Run source separation on stereo audio.
 ///
 /// - `model_bytes`: safetensors weights from IndexedDB
@@ -347,7 +335,7 @@ pub async fn separate(
         HTDEMUCS_ID => ModelOptions::FourStem,
         HTDEMUCS_6S_ID => ModelOptions::SixStem,
         HTDEMUCS_FT_ID => {
-            let stems: Vec<StemId> = stem_strs.iter().filter_map(|s| parse_stem_id(s)).collect();
+            let stems: Vec<StemId> = stem_strs.iter().filter_map(|s| StemId::parse(s)).collect();
             ModelOptions::FineTuned(stems)
         }
         _ => return Err(JsError::new(&format!("Unknown model: {}", model_id))),

@@ -23,17 +23,12 @@ pub(crate) struct CrossDomainTransformer<B: Backend> {
     pub(crate) channel_downsampler_t: Option<Conv1d<B>>,
     pub(crate) layers: Vec<TransformerLayer<B>>,
     pub(crate) layers_t: Vec<TransformerLayer<B>>,
-    // freq_emb moved to HTDemucs
 }
 
 impl<B: Backend> CrossDomainTransformer<B> {
     /// `bottleneck_ch`: channel dim coming out of the last encoder (e.g. 384).
     /// `bottom_channels`: the transformer's internal dim (e.g. 512 for 4-stem, 384 for 6-stem).
-    pub(crate) fn init(
-        bottleneck_ch: usize,
-        bottom_channels: usize,
-        device: &B::Device,
-    ) -> Self {
+    pub(crate) fn init(bottleneck_ch: usize, bottom_channels: usize, device: &B::Device) -> Self {
         let d_model = bottom_channels;
         let n_heads = T_HEADS;
         let ffn_dim = (d_model as f32 * T_HIDDEN_SCALE) as usize;
@@ -42,23 +37,21 @@ impl<B: Backend> CrossDomainTransformer<B> {
         let mut layers = Vec::new();
         let mut layers_t = Vec::new();
         for i in 0..T_LAYERS {
-            // Python HTDemucs has t_norm_out=True by default → norm_out on ALL layers
-            let with_norm_out = true;
             if i % 2 == 0 {
                 // Self-attention (layers 0, 2, 4)
                 layers.push(TransformerLayer::SelfAttn(SelfAttentionLayer::init(
-                    d_model, n_heads, ffn_dim, with_norm_out, device,
+                    d_model, n_heads, ffn_dim, true, device,
                 )));
                 layers_t.push(TransformerLayer::SelfAttn(SelfAttentionLayer::init(
-                    d_model, n_heads, ffn_dim, with_norm_out, device,
+                    d_model, n_heads, ffn_dim, true, device,
                 )));
             } else {
                 // Cross-attention (layers 1, 3)
                 layers.push(TransformerLayer::CrossAttn(CrossAttentionLayer::init(
-                    d_model, n_heads, ffn_dim, with_norm_out, device,
+                    d_model, n_heads, ffn_dim, true, device,
                 )));
                 layers_t.push(TransformerLayer::CrossAttn(CrossAttentionLayer::init(
-                    d_model, n_heads, ffn_dim, with_norm_out, device,
+                    d_model, n_heads, ffn_dim, true, device,
                 )));
             }
         }
@@ -94,8 +87,8 @@ impl<B: Backend> CrossDomainTransformer<B> {
 
     pub fn forward(
         &self,
-        freq: Tensor<B, 4>,  // [1, ch, Fr, T]
-        time: Tensor<B, 3>,  // [1, ch, time_t]
+        freq: Tensor<B, 4>, // [1, ch, Fr, T]
+        time: Tensor<B, 3>, // [1, ch, time_t]
     ) -> crate::Result<(Tensor<B, 4>, Tensor<B, 3>)> {
         // 1. Save original shapes
         let [_, ch, freq_bins, time_f] = freq.dims();
@@ -124,7 +117,7 @@ impl<B: Backend> CrossDomainTransformer<B> {
         // 3. Flatten freq (time-major): [1, d_model, Fr, T] → [1, T*Fr, d_model]
         let device = freq.device();
         let freq = freq
-            .permute([0, 3, 2, 1])             // [1, T, Fr, d_model]
+            .permute([0, 3, 2, 1]) // [1, T, Fr, d_model]
             .reshape([1, time_f * freq_bins, d_model]);
 
         // 4. Reshape time: [1, d_model, time_t] → [1, time_t, d_model]
@@ -152,9 +145,11 @@ impl<B: Backend> CrossDomainTransformer<B> {
                     freq = new_freq;
                     time = new_time;
                 }
-                _ => return Err(DemucsError::Internal(
-                    "freq and time transformer layers must be same type".into(),
-                )),
+                _ => {
+                    return Err(DemucsError::Internal(
+                        "freq and time transformer layers must be same type".into(),
+                    ))
+                }
             }
         }
 
@@ -339,8 +334,8 @@ fn create_sin_embed<B: Backend>(
     for pos in 0..seq_len {
         for i in 0..half {
             let angle = pos as f32 / (10000.0_f32).powf(i as f32 / half_m1);
-            data[pos * d_model + i] = angle.cos();          // first half: cos
-            data[pos * d_model + half + i] = angle.sin();   // second half: sin
+            data[pos * d_model + i] = angle.cos(); // first half: cos
+            data[pos * d_model + half + i] = angle.sin(); // second half: sin
         }
     }
 
@@ -360,8 +355,8 @@ fn create_sin_embed<B: Backend>(
 /// - Channels half+1,half+3,...,d_model-1: cos(freq_pos * div_term)
 fn create_2d_sin_embed<B: Backend>(
     d_model: usize,
-    height: usize,  // freq bins
-    width: usize,   // time steps
+    height: usize, // freq bins
+    width: usize,  // time steps
     device: &B::Device,
 ) -> Tensor<B, 3> {
     let half = d_model / 2;

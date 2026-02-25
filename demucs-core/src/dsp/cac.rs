@@ -46,11 +46,7 @@ pub fn stft_to_cac<B: Backend>(
 ///
 /// Returns a flat vector of `num_frames × (freq_bins + 1)` complex values, with zeroed
 /// Nyquist bins appended to each frame.
-pub fn cac_data_to_complex(
-    data: &[f32],
-    freq_bins: usize,
-    num_frames: usize,
-) -> Vec<Complex<f32>> {
+pub fn cac_data_to_complex(data: &[f32], freq_bins: usize, num_frames: usize) -> Vec<Complex<f32>> {
     let bins = freq_bins + 1; // Add Nyquist bin
     let mut spectrogram = vec![Complex::new(0.0, 0.0); num_frames * bins];
 
@@ -116,10 +112,7 @@ mod tests {
         let n_fft = 4;
 
         // One frame, 2 bins (no Nyquist in input)
-        let spec = vec![
-            Complex::new(1.0, 2.0),
-            Complex::new(3.0, 4.0),
-        ];
+        let spec = vec![Complex::new(1.0, 2.0), Complex::new(3.0, 4.0)];
 
         let tensor = stft_to_cac::<B>(&spec, n_fft, &Default::default());
         let data: Vec<f32> = tensor.to_data().to_vec().unwrap();

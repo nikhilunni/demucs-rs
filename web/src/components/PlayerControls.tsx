@@ -1,15 +1,11 @@
+import { formatTime as fmt } from "../dsp/format";
+
 interface Props {
   fileName: string;
   isPlaying: boolean;
   currentTime: number;
   duration: number;
   onToggle: () => void;
-}
-
-function fmt(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 export function PlayerControls({

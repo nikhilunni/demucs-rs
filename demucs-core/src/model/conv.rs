@@ -76,13 +76,18 @@ impl<B: Backend> TEncLayer<B> {
         let dconv = DConv::init(chout, device);
         let rewrite = Conv1dConfig::new(chout, 2 * chout, 1).init(device);
         let glu = GLU::new(1);
-        Self { conv, dconv, rewrite, glu }
+        Self {
+            conv,
+            dconv,
+            rewrite,
+            glu,
+        }
     }
 
     pub(crate) fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
         // Right-pad so input length is divisible by stride (matching Python HEncLayer)
         let le = x.dims()[2];
-        let x = if le % STRIDE != 0 {
+        let x = if !le.is_multiple_of(STRIDE) {
             let pad_right = STRIDE - (le % STRIDE);
             let [b, c, _t] = x.dims();
             let zeros = Tensor::zeros([b, c, pad_right], &x.device());
@@ -146,11 +151,11 @@ impl<B: Backend> DConvLayer<B> {
 
 #[derive(Module, Debug)]
 pub(crate) struct HDecLayer<B: Backend> {
-    pub(crate) rewrite: Conv2d<B>,          // Conv2d(3,3), padding (1,1)
+    pub(crate) rewrite: Conv2d<B>, // Conv2d(3,3), padding (1,1)
     pub(crate) glu: GLU,
-    pub(crate) dconv: DConv<B>,             // DConv between GLU and conv_tr
+    pub(crate) dconv: DConv<B>, // DConv between GLU and conv_tr
     pub(crate) conv_tr: ConvTranspose2d<B>, // ConvTranspose2d([8,1])
-    pub(crate) last: bool,                  // skip GELU on last layer
+    pub(crate) last: bool,      // skip GELU on last layer
 }
 
 impl<B: Backend> HDecLayer<B> {
@@ -164,28 +169,43 @@ impl<B: Backend> HDecLayer<B> {
             .with_stride([STRIDE, 1])
             .with_padding([KERNEL_SIZE / 4, 0])
             .init(device);
-        Self { rewrite, glu, dconv, conv_tr, last }
+        Self {
+            rewrite,
+            glu,
+            dconv,
+            conv_tr,
+            last,
+        }
     }
 
-    pub(crate) fn forward(&self, x: Tensor<B, 4>, skip: Tensor<B, 4>, freq_target: usize) -> Tensor<B, 4> {
+    pub(crate) fn forward(
+        &self,
+        x: Tensor<B, 4>,
+        skip: Tensor<B, 4>,
+        freq_target: usize,
+    ) -> Tensor<B, 4> {
         let x = x + skip;
         let x = self.rewrite.forward(x); // Conv2d(3,3)
-        let x = self.glu.forward(x);     // GLU on dim=1
-        // DConv: flatten [B, C, Fr, T] → [B*Fr, C, T], apply, reshape back
+        let x = self.glu.forward(x); // GLU on dim=1
+                                     // DConv: flatten [B, C, Fr, T] → [B*Fr, C, T], apply, reshape back
         let [b, c, fr, t] = x.dims();
-        let x = x.swap_dims(1, 2);           // [B, Fr, C, T]
-        let x = x.reshape([b * fr, c, t]);   // [B*Fr, C, T]
+        let x = x.swap_dims(1, 2); // [B, Fr, C, T]
+        let x = x.reshape([b * fr, c, t]); // [B*Fr, C, T]
         let x = self.dconv.forward(x);
-        let x = x.reshape([b, fr, c, t]);    // [B, Fr, C, T]
-        let x = x.swap_dims(1, 2);           // [B, C, Fr, T]
-        let x = self.conv_tr.forward(x);     // ConvTranspose2d([8,1])
-        // Trim freq dim if ConvTranspose produced extra bins
+        let x = x.reshape([b, fr, c, t]); // [B, Fr, C, T]
+        let x = x.swap_dims(1, 2); // [B, C, Fr, T]
+        let x = self.conv_tr.forward(x); // ConvTranspose2d([8,1])
+                                         // Trim freq dim if ConvTranspose produced extra bins
         let x = if x.dims()[2] > freq_target {
             x.narrow(2, 0, freq_target)
         } else {
             x
         };
-        if self.last { x } else { activation::gelu(x) }
+        if self.last {
+            x
+        } else {
+            activation::gelu(x)
+        }
     }
 }
 
@@ -209,10 +229,21 @@ impl<B: Backend> TDecLayer<B> {
             .with_stride(STRIDE)
             .with_padding(KERNEL_SIZE / 4)
             .init(device);
-        Self { rewrite, glu, dconv, conv_tr, last }
+        Self {
+            rewrite,
+            glu,
+            dconv,
+            conv_tr,
+            last,
+        }
     }
 
-    pub(crate) fn forward(&self, x: Tensor<B, 3>, skip: Tensor<B, 3>, time_target: usize) -> Tensor<B, 3> {
+    pub(crate) fn forward(
+        &self,
+        x: Tensor<B, 3>,
+        skip: Tensor<B, 3>,
+        time_target: usize,
+    ) -> Tensor<B, 3> {
         // Trim skip to match x's time dimension (Python: skip[..., :x.shape[-1]])
         let skip = if skip.dims()[2] > x.dims()[2] {
             skip.narrow(2, 0, x.dims()[2])
@@ -231,7 +262,11 @@ impl<B: Backend> TDecLayer<B> {
         } else {
             x
         };
-        if self.last { x } else { activation::gelu(x) }
+        if self.last {
+            x
+        } else {
+            activation::gelu(x)
+        }
     }
 }
 
@@ -283,7 +318,9 @@ impl<B: Backend> LayerScale<B> {
 mod tests {
     use super::*;
     use burn::backend::NdArray;
-    use burn::nn::conv::{Conv1dConfig, Conv2dConfig, ConvTranspose1dConfig, ConvTranspose2dConfig};
+    use burn::nn::conv::{
+        Conv1dConfig, Conv2dConfig, ConvTranspose1dConfig, ConvTranspose2dConfig,
+    };
     use burn::nn::{GroupNormConfig, PaddingConfig1d, PaddingConfig2d};
     use burn::tensor::Distribution;
 
@@ -426,11 +463,7 @@ mod tests {
     fn henc_layer_output_shape() {
         // 4D: [1, 4, 2048, 8] → [1, 48, 512, 8]
         let layer = make_henc_layer(4, 48);
-        let x = Tensor::<B, 4>::random(
-            [1, 4, 2048, 8],
-            Distribution::Default,
-            &Default::default(),
-        );
+        let x = Tensor::<B, 4>::random([1, 4, 2048, 8], Distribution::Default, &Default::default());
         let out = layer.forward(x);
         assert_eq!(out.dims(), [1, 48, 512, 8]);
     }
@@ -439,11 +472,7 @@ mod tests {
     fn henc_layer_freq_downsampling() {
         // Freq dim gets downsampled by stride 4
         let layer = make_henc_layer(4, 48);
-        let x = Tensor::<B, 4>::random(
-            [1, 4, 64, 8],
-            Distribution::Default,
-            &Default::default(),
-        );
+        let x = Tensor::<B, 4>::random([1, 4, 64, 8], Distribution::Default, &Default::default());
         let out = layer.forward(x);
         assert_eq!(out.dims(), [1, 48, 16, 8]); // freq: 64/4=16, time preserved
     }
@@ -452,11 +481,7 @@ mod tests {
     fn henc_layer_second_level() {
         // Encoder layer 1: 48 → 96 channels
         let layer = make_henc_layer(48, 96);
-        let x = Tensor::<B, 4>::random(
-            [1, 48, 512, 8],
-            Distribution::Default,
-            &Default::default(),
-        );
+        let x = Tensor::<B, 4>::random([1, 48, 512, 8], Distribution::Default, &Default::default());
         let out = layer.forward(x);
         assert_eq!(out.dims(), [1, 96, 128, 8]); // freq: 512/4=128
     }
@@ -571,16 +596,9 @@ mod tests {
     fn hdec_layer_output_shape() {
         // Decoder layer 0: 384 → 192 (4D)
         let layer = make_hdec_layer(384, 192, false);
-        let x = Tensor::<B, 4>::random(
-            [1, 384, 8, 4],
-            Distribution::Default,
-            &Default::default(),
-        );
-        let skip = Tensor::<B, 4>::random(
-            [1, 384, 8, 4],
-            Distribution::Default,
-            &Default::default(),
-        );
+        let x = Tensor::<B, 4>::random([1, 384, 8, 4], Distribution::Default, &Default::default());
+        let skip =
+            Tensor::<B, 4>::random([1, 384, 8, 4], Distribution::Default, &Default::default());
         let out = layer.forward(x, skip, 32);
         assert_eq!(out.dims(), [1, 192, 32, 4]);
     }
@@ -589,16 +607,9 @@ mod tests {
     fn hdec_layer_last() {
         // Decoder layer 3: 48 → 16 (last layer, no GELU)
         let layer = make_hdec_layer(48, 16, true);
-        let x = Tensor::<B, 4>::random(
-            [1, 48, 128, 4],
-            Distribution::Default,
-            &Default::default(),
-        );
-        let skip = Tensor::<B, 4>::random(
-            [1, 48, 128, 4],
-            Distribution::Default,
-            &Default::default(),
-        );
+        let x = Tensor::<B, 4>::random([1, 48, 128, 4], Distribution::Default, &Default::default());
+        let skip =
+            Tensor::<B, 4>::random([1, 48, 128, 4], Distribution::Default, &Default::default());
         let out = layer.forward(x, skip, 512);
         assert_eq!(out.dims(), [1, 16, 512, 4]);
     }
@@ -628,11 +639,7 @@ mod tests {
         // Encoder then decoder should recover original freq dimension
         let enc = make_henc_layer(4, 48);
         let dec = make_hdec_layer(48, 4, true);
-        let x = Tensor::<B, 4>::random(
-            [1, 4, 64, 8],
-            Distribution::Default,
-            &Default::default(),
-        );
+        let x = Tensor::<B, 4>::random([1, 4, 64, 8], Distribution::Default, &Default::default());
         let encoded = enc.forward(x);
         assert_eq!(encoded.dims(), [1, 48, 16, 8]);
         let skip = encoded.clone();

@@ -1,6 +1,6 @@
 import initWasm, { compute_spectrogram, get_model_registry, separate, warmup_model } from "./wasm/demucs_wasm.js";
 
-let wasmReady: Promise<any>;
+let wasmReady: Promise<unknown>;
 
 self.onmessage = async (e: MessageEvent) => {
   const { type, id, ...data } = e.data;
@@ -40,7 +40,7 @@ self.onmessage = async (e: MessageEvent) => {
         await wasmReady;
 
         // Progress callback: forward events to main thread (fire-and-forget)
-        const onProgress = (event: any) => {
+        const onProgress = (event: Record<string, unknown>) => {
           self.postMessage({ type: "progress", event });
         };
 

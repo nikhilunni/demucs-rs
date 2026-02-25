@@ -7,19 +7,17 @@ use std::path::PathBuf;
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 use demucs_core::listener::DebugListener;
-use demucs_core::model::metadata::{
-    ModelInfo, StemId, ALL_MODELS, HTDEMUCS_FT_ID, HTDEMUCS_6S_ID,
-};
+use demucs_core::model::metadata::{ModelInfo, StemId, ALL_MODELS, HTDEMUCS_6S_ID, HTDEMUCS_FT_ID};
 use demucs_core::provider::fs::FsProvider;
 use demucs_core::provider::ModelProvider;
-use demucs_core::{Demucs, ModelOptions, num_chunks};
+use demucs_core::{num_chunks, Demucs, ModelOptions};
 
 use crate::progress::CliListener;
 
 #[cfg(not(feature = "cpu"))]
-use burn::backend::wgpu::{RuntimeOptions, init_setup, graphics::AutoGraphicsApi};
+use burn::backend::wgpu::{graphics::AutoGraphicsApi, init_setup, RuntimeOptions};
 #[cfg(not(feature = "cpu"))]
-use cubecl::config::{GlobalConfig, autotune::AutotuneConfig, cache::CacheConfig};
+use cubecl::config::{autotune::AutotuneConfig, cache::CacheConfig, GlobalConfig};
 
 #[cfg(not(feature = "cpu"))]
 type B = burn::backend::wgpu::Wgpu;
@@ -53,18 +51,6 @@ struct Cli {
     debug: bool,
 }
 
-fn parse_stem_id(s: &str) -> Option<StemId> {
-    match s {
-        "drums" => Some(StemId::Drums),
-        "bass" => Some(StemId::Bass),
-        "other" => Some(StemId::Other),
-        "vocals" => Some(StemId::Vocals),
-        "guitar" => Some(StemId::Guitar),
-        "piano" => Some(StemId::Piano),
-        _ => None,
-    }
-}
-
 fn resolve_model_info(model_id: &str) -> Result<&'static ModelInfo> {
     ALL_MODELS
         .iter()
@@ -94,14 +80,18 @@ fn main() -> Result<()> {
         Some(names) => {
             let mut ids = Vec::new();
             for name in names {
-                match parse_stem_id(name) {
+                match StemId::parse(name) {
                     Some(id) => {
                         if !info.stems.contains(&id) {
                             bail!(
                                 "Stem '{}' is not available for model '{}'. Available: {}",
                                 name,
                                 info.id,
-                                info.stems.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                                info.stems
+                                    .iter()
+                                    .map(|s| s.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
                             );
                         }
                         ids.push(id);
@@ -166,15 +156,15 @@ fn main() -> Result<()> {
         init_setup::<AutoGraphicsApi>(&device, options);
     }
 
-    let model = Demucs::<B>::from_bytes(opts, &bytes, device)
-        .context("Failed to load model weights")?;
+    let model =
+        Demucs::<B>::from_bytes(opts, &bytes, device).context("Failed to load model weights")?;
 
     // 5b. Warmup GPU shaders if autotune cache is empty (first run only)
     #[cfg(not(feature = "cpu"))]
     {
         let cache_dir = CacheConfig::Global.root().join("autotune");
         let cached = cache_dir.is_dir()
-            && std::fs::read_dir(&cache_dir).map_or(false, |mut d| d.next().is_some());
+            && std::fs::read_dir(&cache_dir).is_ok_and(|mut d| d.next().is_some());
         if !cached {
             eprintln!("Pre-compiling GPU shaders (first run only)...");
             pollster::block_on(model.warmup());
@@ -184,7 +174,12 @@ fn main() -> Result<()> {
     // 6. Run separation
     eprintln!("Separating...");
     let stems = if cli.debug {
-        pollster::block_on(model.separate_with_listener(&left, &right, sample_rate, &mut DebugListener))?
+        pollster::block_on(model.separate_with_listener(
+            &left,
+            &right,
+            sample_rate,
+            &mut DebugListener,
+        ))?
     } else {
         let n_models = if info.id == HTDEMUCS_FT_ID {
             selected.len()
@@ -203,8 +198,12 @@ fn main() -> Result<()> {
     };
 
     // 7. Write output stems
-    std::fs::create_dir_all(&cli.output)
-        .with_context(|| format!("Failed to create output directory: {}", cli.output.display()))?;
+    std::fs::create_dir_all(&cli.output).with_context(|| {
+        format!(
+            "Failed to create output directory: {}",
+            cli.output.display()
+        )
+    })?;
 
     for stem in &stems {
         if !selected.contains(&stem.id) {

@@ -2,12 +2,7 @@ import { useEffect, useState } from "react";
 import { getModels, type ModelVariant, type StemId, type SelectedModel } from "../models/registry";
 import { useModelDownload, type DownloadState } from "../models/useModelDownload";
 import { ProgressBar } from "./ProgressBar";
-
-function fmt(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
+import { formatTime as fmt } from "../dsp/format";
 
 interface Props {
   onRun: (model: SelectedModel) => void;

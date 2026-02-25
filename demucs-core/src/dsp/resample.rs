@@ -20,8 +20,7 @@ pub fn resample_channel(samples: &[f32], from_rate: u32, to_rate: u32) -> Result
     let rolloff: f64 = 0.99;
 
     let base_freq = (orig_freq.min(new_freq) as f64) * rolloff;
-    let width =
-        ((lowpass_filter_width as f64) * (orig_freq as f64) / base_freq).ceil() as usize;
+    let width = ((lowpass_filter_width as f64) * (orig_freq as f64) / base_freq).ceil() as usize;
 
     // Build polyphase kernel: [new_freq, kernel_len]
     // where kernel_len = 2*width + orig_freq
@@ -82,8 +81,7 @@ pub fn resample_channel(samples: &[f32], from_rate: u32, to_rate: u32) -> Result
     }
 
     // Trim to target length (matching torchaudio: ceil(new_freq * length / orig_freq))
-    let target_length =
-        ((new_freq as f64 * length as f64) / orig_freq as f64).ceil() as usize;
+    let target_length = ((new_freq as f64 * length as f64) / orig_freq as f64).ceil() as usize;
     output.truncate(target_length);
 
     Ok(output)
