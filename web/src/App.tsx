@@ -269,6 +269,20 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [phase.kind, trackInfo, player.toggle, multiPlayer.toggleAll, clipRange]);
 
+  // Dynamic page title — show progress percentage while separating
+  useEffect(() => {
+    if (phase.kind === "separating") {
+      const total = progress.chunk?.total ?? 1;
+      const done = progress.chunk
+        ? progress.chunk.index + (progress.done ? 1 : 0)
+        : 0;
+      const pct = Math.round((done / total) * 100);
+      document.title = `(${pct}%) Separating — Demucs`;
+    } else {
+      document.title = "Demucs";
+    }
+  }, [phase.kind, progress]);
+
   const hasTrack = trackInfo !== null;
   const tagline =
     phase.kind === "warmup"

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Background circle -->
+  <circle cx="32" cy="32" r="30" fill="#14131f" stroke="#f07a5c" stroke-width="2"/>
+  <!-- Single input waveform on the left -->
+  <path d="M12 32 Q16 24, 20 32 Q24 40, 28 32" stroke="#e8e5f0" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <!-- Fork/split symbol -->
+  <path d="M28 32 L36 22" stroke="#f07a5c" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path d="M28 32 L36 32" stroke="#f07a5c" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path d="M28 32 L36 42" stroke="#f07a5c" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <!-- Output stems (small waveforms) -->
+  <path d="M36 22 Q40 18, 44 22 Q48 26, 52 22" stroke="#7c6ff0" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path d="M36 32 Q40 28, 44 32 Q48 36, 52 32" stroke="#f07a5c" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path d="M36 42 Q40 38, 44 42 Q48 46, 52 42" stroke="#7c6ff0" stroke-width="2" fill="none" stroke-linecap="round"/>
+</svg>
