@@ -328,7 +328,7 @@ export default function App() {
                       : player.seek
                 }
                 clipRange={clipRange}
-                onClipChange={phase.kind === "separated" ? undefined : setClipRange}
+                onClipChange={setClipRange}
               />
               <PlayerControls
                 fileName={trackInfo.fileName}

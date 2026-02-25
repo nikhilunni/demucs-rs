@@ -60,7 +60,7 @@ pub const HTDEMUCS_6S: ModelInfo = ModelInfo {
 pub const HTDEMUCS_FT: ModelInfo = ModelInfo {
     id: HTDEMUCS_FT_ID,
     label: "Fine-Tuned",
-    description: "4 stems \u{2014} best quality, larger download",
+    description: "Up to 4 stems \u{2014} best quality, but longer inference",
     filename: "htdemucs_ft.safetensors",
     size_mb: 333,
     stems: &[Drums, Bass, Other, Vocals],
