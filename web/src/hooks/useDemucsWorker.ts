@@ -25,12 +25,7 @@ export interface SeparateOptions {
 /** Progress events emitted during model forward pass. */
 export type ProgressEvent =
   | { type: "chunk_started"; index: number; total: number }
-  | { type: "chunk_done"; index: number; total: number }
-  | { type: "encoder_done"; domain: "freq" | "time"; layer: number; numLayers: number }
-  | { type: "transformer_done" }
-  | { type: "decoder_done"; domain: "freq" | "time"; layer: number; numLayers: number }
-  | { type: "denormalized" }
-  | { type: "stem_done"; index: number; total: number };
+  | { type: "chunk_done"; index: number; total: number };
 
 export interface WarmupOptions {
   modelBytes: Uint8Array;

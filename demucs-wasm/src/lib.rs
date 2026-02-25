@@ -11,33 +11,16 @@ use burn::backend::wgpu::graphics::WebGpu;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
-fn perf_now() -> f64 {
-    js_sys::Date::now()
-}
-
-macro_rules! wasm_log {
-    ($($arg:tt)*) => {
-        web_sys::console::log_1(&format!($($arg)*).into());
-    };
-}
-
 // ─── Listeners ──────────────────────────────────────────────────────────────
 
-/// Listener that both logs timing AND calls a JS callback for progress events.
+/// Listener that forwards chunk progress events to a JS callback.
 struct ProgressListener {
-    last: f64,
     callback: Option<js_sys::Function>,
 }
 
 impl ProgressListener {
     fn new(callback: Option<js_sys::Function>) -> Self {
-        Self { last: perf_now(), callback }
-    }
-
-    fn lap(&mut self, label: &str) {
-        let now = perf_now();
-        wasm_log!("[wasm]   {}: {:.0}ms", label, now - self.last);
-        self.last = now;
+        Self { callback }
     }
 
     fn emit(&self, obj: &js_sys::Object) {
@@ -58,49 +41,7 @@ fn set_u32(obj: &js_sys::Object, key: &str, val: u32) {
 impl ForwardListener for ProgressListener {
     fn on_event(&mut self, event: ForwardEvent) {
         match &event {
-            ForwardEvent::Normalized => self.lap("normalize"),
-            ForwardEvent::EncoderDone { domain, layer, num_layers, .. } => {
-                self.lap(&format!("{} encoder {}", domain, layer));
-                let obj = js_sys::Object::new();
-                set_str(&obj, "type", "encoder_done");
-                set_str(&obj, "domain", &domain.to_string());
-                set_u32(&obj, "layer", *layer as u32);
-                set_u32(&obj, "numLayers", *num_layers as u32);
-                self.emit(&obj);
-            }
-            ForwardEvent::FreqEmbApplied => self.lap("freq_emb"),
-            ForwardEvent::TransformerDone { .. } => {
-                self.lap("transformer");
-                let obj = js_sys::Object::new();
-                set_str(&obj, "type", "transformer_done");
-                self.emit(&obj);
-            }
-            ForwardEvent::DecoderDone { domain, layer, num_layers, .. } => {
-                self.lap(&format!("{} decoder {}", domain, layer));
-                let obj = js_sys::Object::new();
-                set_str(&obj, "type", "decoder_done");
-                set_str(&obj, "domain", &domain.to_string());
-                set_u32(&obj, "layer", *layer as u32);
-                set_u32(&obj, "numLayers", *num_layers as u32);
-                self.emit(&obj);
-            }
-            ForwardEvent::Denormalized => {
-                self.lap("denormalize");
-                let obj = js_sys::Object::new();
-                set_str(&obj, "type", "denormalized");
-                self.emit(&obj);
-            }
-            ForwardEvent::StemDone { index, total } => {
-                self.lap(&format!("stem extract {}/{}", index + 1, total));
-                let obj = js_sys::Object::new();
-                set_str(&obj, "type", "stem_done");
-                set_u32(&obj, "index", *index as u32);
-                set_u32(&obj, "total", *total as u32);
-                self.emit(&obj);
-            }
             ForwardEvent::ChunkStarted { index, total } => {
-                wasm_log!("[wasm] chunk {}/{} started", index + 1, total);
-                self.last = perf_now();
                 let obj = js_sys::Object::new();
                 set_str(&obj, "type", "chunk_started");
                 set_u32(&obj, "index", *index as u32);
@@ -108,7 +49,6 @@ impl ForwardListener for ProgressListener {
                 self.emit(&obj);
             }
             ForwardEvent::ChunkDone { index, total } => {
-                self.lap(&format!("chunk {}/{} done", index + 1, total));
                 let obj = js_sys::Object::new();
                 set_str(&obj, "type", "chunk_done");
                 set_u32(&obj, "index", *index as u32);
@@ -299,15 +239,12 @@ pub async fn warmup_model(
     ensure_panic_hook();
 
     // Initialize WebGPU (same as separate)
-    let t0 = perf_now();
     let device = WgpuDevice::default();
     if !WGPU_INITIALIZED.load(Ordering::SeqCst) {
         init_setup_async::<WebGpu>(&device, RuntimeOptions::default()).await;
         WGPU_INITIALIZED.store(true, Ordering::SeqCst);
     }
-    wasm_log!("[wasm] Warmup: WebGPU init {:.0}ms", perf_now() - t0);
 
-    let t0 = perf_now();
     let opts = match model_id {
         HTDEMUCS_ID => ModelOptions::FourStem,
         HTDEMUCS_6S_ID => ModelOptions::SixStem,
@@ -319,11 +256,8 @@ pub async fn warmup_model(
     };
     let model = Demucs::<B>::from_bytes(opts, model_bytes, device)
         .map_err(|e| JsError::new(&format!("Warmup model load failed: {}", e)))?;
-    wasm_log!("[wasm] Warmup: model load {:.0}ms", perf_now() - t0);
 
-    let t0 = perf_now();
     model.warmup().await;
-    wasm_log!("[wasm] Warmup: full pipeline {:.0}ms", perf_now() - t0);
 
     Ok(())
 }
@@ -396,7 +330,6 @@ pub async fn separate(
     on_progress: Option<js_sys::Function>,
 ) -> Result<SeparationResult, JsError> {
     ensure_panic_hook();
-    let t_total = perf_now();
 
     let stem_strs: Vec<String> = serde_wasm_bindgen::from_value(selected_stems)
         .map_err(|e| JsError::new(&format!("Invalid stems array: {}", e)))?;
@@ -415,26 +348,18 @@ pub async fn separate(
     };
 
     // WebGPU device must be initialized asynchronously on WASM (only once)
-    let t0 = perf_now();
     let device = WgpuDevice::default();
     if !WGPU_INITIALIZED.load(Ordering::SeqCst) {
         init_setup_async::<WebGpu>(&device, RuntimeOptions::default()).await;
         WGPU_INITIALIZED.store(true, Ordering::SeqCst);
     }
-    wasm_log!("[wasm] WebGPU init: {:.0}ms", perf_now() - t0);
 
-    let t0 = perf_now();
     let model = Demucs::<B>::from_bytes(opts, model_bytes, device)
         .map_err(|e| JsError::new(&format!("Failed to load model: {}", e)))?;
-    wasm_log!("[wasm] Model load: {:.0}ms", perf_now() - t0);
 
-    wasm_log!("[wasm] Input: {}ch x {} samples @ {}Hz", 2, left.len(), sample_rate);
-
-    let t0 = perf_now();
     let mut listener = ProgressListener::new(on_progress);
     let stems = model.separate_with_listener(left, right, sample_rate, &mut listener).await
         .map_err(|e| JsError::new(&format!("Separation failed: {}", e)))?;
-    wasm_log!("[wasm] Inference: {:.0}ms", perf_now() - t0);
 
     // Use actual stem output length (may differ from input length after
     // round-trip resampling, e.g. 48kHz → 44.1kHz → 48kHz).
@@ -453,8 +378,6 @@ pub async fn separate(
         audio.extend_from_slice(&stem.right);
         stem_names.push(name);
     }
-
-    wasm_log!("[wasm] Total: {:.0}ms", perf_now() - t_total);
 
     Ok(SeparationResult {
         audio,
