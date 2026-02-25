@@ -1322,6 +1322,132 @@ body {
   height: 100px;
 }
 
+/* ══════════════════════════════════════════════════════════════
+   Clip Selection Overlay
+   ══════════════════════════════════════════════════════════════ */
+.clip-dim {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.clip-selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-top: 1px solid rgba(124, 111, 240, 0.5);
+  border-bottom: 1px solid rgba(124, 111, 240, 0.5);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.clip-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 16px;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.clip-handle__grip {
+  width: 4px;
+  height: 40px;
+  border-radius: 2px;
+  background: var(--accent-cool);
+  box-shadow: 0 0 8px var(--accent-cool-glow);
+  transition: height 0.15s ease;
+}
+
+.clip-handle:hover .clip-handle__grip {
+  height: 56px;
+}
+
+.clip-time {
+  position: absolute;
+  top: 6px;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.6);
+  padding: 2px 6px;
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 6;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.clip-clear {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 6;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.spectrogram-wrap:hover .clip-clear {
+  opacity: 1;
+}
+
+.clip-clear:hover {
+  border-color: var(--accent);
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.clip-tooltip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.7);
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(124, 111, 240, 0.3);
+  pointer-events: none;
+  z-index: 6;
+  white-space: nowrap;
+  user-select: none;
+  animation: clip-tooltip-in 0.3s ease, clip-tooltip-out 0.4s ease 2.5s forwards;
+}
+
+@keyframes clip-tooltip-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.95); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes clip-tooltip-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
 /* ── Utility ──────────────────────────────────────────────────── */
 @keyframes fade-in {
   from {

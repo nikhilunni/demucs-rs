@@ -45,6 +45,7 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>({ kind: "warmup" });
   const [trackInfo, setTrackInfo] = useState<TrackInfo | null>(null);
   const [progress, setProgress] = useState<ModelProgressState>(INITIAL_PROGRESS);
+  const [clipRange, setClipRange] = useState<[number, number] | null>(null);
 
   const audioUrl = trackInfo?.audioUrl ?? null;
   const player = useAudioPlayer(audioUrl);
@@ -97,6 +98,7 @@ export default function App() {
 
     setPhase({ kind: "loading" });
     setTrackInfo(null);
+    setClipRange(null);
 
     // Yield to let React paint the loading state before heavy computation
     await new Promise((r) => setTimeout(r, 60));
@@ -169,14 +171,24 @@ export default function App() {
         setProgress(next);
       };
 
+      // Slice audio to clip range if set
+      let left = trackInfo.left;
+      let right = trackInfo.right;
+      if (clipRange) {
+        const s = Math.floor(clipRange[0] * trackInfo.sampleRate);
+        const e = Math.ceil(clipRange[1] * trackInfo.sampleRate);
+        left = left.slice(s, e);
+        right = right.slice(s, e);
+      }
+
       // Run separation in worker (transfers modelBytes buffer)
       const { audio, stemNames: names, nSamples, numStems } = await worker.separate(
         {
           modelBytes,
           modelId: selection.variant.id,
           stems: stemNames,
-          left: trackInfo.left,
-          right: trackInfo.right,
+          left,
+          right,
           sampleRate: trackInfo.sampleRate,
         },
         onProgress,
@@ -220,7 +232,7 @@ export default function App() {
       alert(`Separation failed: ${err instanceof Error ? err.message : err}`);
       setPhase({ kind: "ready" });
     }
-  }, [trackInfo, worker]);
+  }, [trackInfo, worker, clipRange]);
 
   const handleReset = useCallback(() => {
     if (trackInfo) {
@@ -229,25 +241,33 @@ export default function App() {
     for (const url of stemUrlsRef.current) URL.revokeObjectURL(url);
     stemUrlsRef.current = [];
     setTrackInfo(null);
+    setClipRange(null);
     setPhase({ kind: "idle" });
   }, [trackInfo]);
 
-  // Space bar → play / pause (multi-track when separated, original otherwise)
+  // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.code !== "Space") return;
-      if (!trackInfo) return;
-      e.preventDefault();
+      // Space → play / pause
+      if (e.code === "Space") {
+        if (!trackInfo) return;
+        e.preventDefault();
+        if (phase.kind === "separated") {
+          multiPlayer.toggleAll();
+        } else {
+          player.toggle();
+        }
+        return;
+      }
 
-      if (phase.kind === "separated") {
-        multiPlayer.toggleAll();
-      } else {
-        player.toggle();
+      // Escape → clear clip selection
+      if (e.code === "Escape" && clipRange) {
+        setClipRange(null);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [phase.kind, trackInfo, player.toggle, multiPlayer.toggleAll]);
+  }, [phase.kind, trackInfo, player.toggle, multiPlayer.toggleAll, clipRange]);
 
   const hasTrack = trackInfo !== null;
   const tagline =
@@ -288,10 +308,27 @@ export default function App() {
             <div className="player-area">
               <SpectrogramView
                 image={trackInfo.image}
-                currentTime={phase.kind === "separated" ? multiPlayer.currentTime : player.currentTime}
-                duration={phase.kind === "separated" ? multiPlayer.duration : player.duration}
+                currentTime={
+                  phase.kind === "separated" && clipRange
+                    ? clipRange[0] + multiPlayer.currentTime
+                    : phase.kind === "separated"
+                      ? multiPlayer.currentTime
+                      : player.currentTime
+                }
+                duration={player.duration}
                 sampleRate={trackInfo.sampleRate}
-                onSeek={phase.kind === "separated" ? multiPlayer.seek : player.seek}
+                onSeek={
+                  phase.kind === "separated" && clipRange
+                    ? (time: number) => {
+                        const clamped = Math.max(clipRange[0], Math.min(clipRange[1], time));
+                        multiPlayer.seek(clamped - clipRange[0]);
+                      }
+                    : phase.kind === "separated"
+                      ? multiPlayer.seek
+                      : player.seek
+                }
+                clipRange={clipRange}
+                onClipChange={phase.kind === "separated" ? undefined : setClipRange}
               />
               <PlayerControls
                 fileName={trackInfo.fileName}
@@ -316,6 +353,7 @@ export default function App() {
             <ModelSidebar
               onRun={handleRun}
               disabled={phase.kind === "separating"}
+              clipRange={clipRange}
             />
           </>
         )}

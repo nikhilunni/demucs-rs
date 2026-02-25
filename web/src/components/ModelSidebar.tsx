@@ -3,9 +3,16 @@ import { getModels, type ModelVariant, type StemId, type SelectedModel } from ".
 import { useModelDownload, type DownloadState } from "../models/useModelDownload";
 import { ProgressBar } from "./ProgressBar";
 
+function fmt(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 interface Props {
   onRun: (model: SelectedModel) => void;
   disabled?: boolean;
+  clipRange?: [number, number] | null;
 }
 
 function ModelCard({
@@ -86,7 +93,7 @@ function StemChips({
   );
 }
 
-export function ModelSidebar({ onRun, disabled = false }: Props) {
+export function ModelSidebar({ onRun, disabled = false, clipRange = null }: Props) {
   const models = getModels();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedStems, setSelectedStems] = useState<StemId[]>([]);
@@ -170,7 +177,9 @@ export function ModelSidebar({ onRun, disabled = false }: Props) {
           }
         }}
       >
-        Run separation
+        {clipRange
+          ? `Run separation (${fmt(clipRange[0])} – ${fmt(clipRange[1])})`
+          : "Run separation"}
       </button>
     </aside>
   );
