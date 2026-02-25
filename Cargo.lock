@@ -2031,7 +2031,6 @@ dependencies = [
  "half",
  "pollster",
  "realfft",
- "rubato",
  "safetensors 0.5.3",
 ]
 
@@ -4938,18 +4937,6 @@ dependencies = [
  "rustc_version",
  "syn 2.0.116",
  "unicode-ident",
-]
-
-[[package]]
-name = "rubato"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6dd52e80cfc21894deadf554a5673002938ae4625f7a283e536f9cf7c17b0d5"
-dependencies = [
- "num-complex",
- "num-integer",
- "num-traits",
- "realfft",
 ]
 
 [[package]]
