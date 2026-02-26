@@ -4,3 +4,12 @@ target/
 web/node_modules/
 web/dist/
 web/src/wasm/
+
+# Swift package build artifacts
+demucs-plugin/ui-macos/.build/
+
+# macOS
+.DS_Store
+
+# IDE / tools
+.playwright-mcp/

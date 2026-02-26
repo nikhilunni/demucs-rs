@@ -3,7 +3,7 @@ use std::sync::Once;
 
 use burn::backend::wgpu::graphics::WebGpu;
 use burn::backend::wgpu::{init_setup_async, RuntimeOptions, Wgpu, WgpuDevice};
-use demucs_core::dsp::stft::Stft;
+use demucs_core::dsp::spectrogram;
 use demucs_core::listener::{ForwardEvent, ForwardListener};
 use demucs_core::model::metadata::{
     self, StemId, ALL_MODELS, HTDEMUCS_6S_ID, HTDEMUCS_FT_ID, HTDEMUCS_ID,
@@ -68,9 +68,6 @@ impl ForwardListener for ProgressListener {
 
 type B = Wgpu;
 
-const N_FFT: usize = 4096;
-const HOP_LENGTH: usize = 1024;
-
 static PANIC_HOOK: Once = Once::new();
 static WGPU_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
@@ -121,26 +118,13 @@ impl SpectrogramResult {
 /// Uses `n_fft = 4096` and `hop_length = 1024` to match HTDemucs.
 #[wasm_bindgen]
 pub fn compute_spectrogram(samples: &[f32]) -> Result<SpectrogramResult, JsError> {
-    let num_bins = N_FFT / 2; // forward() drops the Nyquist bin
-
-    let mut stft = Stft::new(N_FFT, HOP_LENGTH);
-    let complex = stft
-        .forward(samples)
+    let data = spectrogram::compute_spectrogram(samples)
         .map_err(|e| JsError::new(&format!("{}", e)))?;
-    let num_frames = complex.len() / num_bins;
-
-    let mags: Vec<f32> = complex
-        .iter()
-        .map(|c| {
-            let mag = (c.re * c.re + c.im * c.im).sqrt();
-            20.0 * (mag + 1e-10).log10()
-        })
-        .collect();
 
     Ok(SpectrogramResult {
-        mags,
-        num_frames: num_frames as u32,
-        num_bins: num_bins as u32,
+        mags: data.mags,
+        num_frames: data.num_frames,
+        num_bins: data.num_bins,
     })
 }
 

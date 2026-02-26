@@ -1,8 +1,12 @@
-.PHONY: cli wasm wasm-release web dev dev-release clean
+.PHONY: cli plugin wasm wasm-release web dev dev-release clean
 
 # Build native CLI (release, auto-detects GPU backend via target-conditional deps)
 cli:
 	cargo build -p demucs-cli --release
+
+# Build and bundle DAW plugin (VST3 + CLAP)
+plugin:
+	cargo xtask bundle demucs-plugin --release
 
 # Build WASM (debug — fast compile, slow runtime)
 wasm:

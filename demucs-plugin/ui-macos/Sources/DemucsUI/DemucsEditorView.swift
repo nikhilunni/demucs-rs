@@ -1,0 +1,478 @@
+import SwiftUI
+import CDemucsTypes
+
+/// Root view that switches between phases with animated transitions.
+struct DemucsEditorView: View {
+    @EnvironmentObject var viewState: ViewState
+    @EnvironmentObject var callbackHandler: CallbackHandler
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header — always visible
+            HeaderView()
+
+            // Phase content
+            ZStack {
+                switch viewState.phase {
+                case .idle:
+                    IdleView()
+                        .transition(.opacity)
+                case .error:
+                    ErrorView()
+                        .transition(.opacity)
+                default:
+                    // audioLoaded, downloading, processing, ready all share
+                    // the same layout: spectrogram + sidebar
+                    PlayerLayout()
+                        .transition(.opacity)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(Theme.springAnimation, value: viewState.phase)
+        }
+        .background(Theme.bg)
+    }
+}
+
+/// Shared layout for audioLoaded / downloading / processing / ready.
+/// Matches the web app: spectrogram + controls on left, model sidebar on right.
+struct PlayerLayout: View {
+    @EnvironmentObject var viewState: ViewState
+    @EnvironmentObject var callbackHandler: CallbackHandler
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // Main player area
+            VStack(alignment: .leading, spacing: 0) {
+                // Spectrogram (260px matching web)
+                SpectrogramImageView(image: viewState.spectrogramImage)
+                    .frame(height: 260)
+                    .padding(.horizontal, Theme.padding)
+                    .padding(.top, 14)
+
+                // Player controls row
+                PlayerControlsRow()
+                    .padding(.horizontal, Theme.padding)
+                    .padding(.top, 8)
+
+                // Phase-specific content below controls
+                phaseContent
+
+                Spacer(minLength: 0)
+            }
+
+            // Model sidebar
+            ModelSidebar()
+        }
+    }
+
+    @ViewBuilder
+    private var phaseContent: some View {
+        switch viewState.phase {
+        case .downloading:
+            DownloadProgressBar()
+                .padding(.horizontal, Theme.padding)
+                .padding(.top, 12)
+        case .processing:
+            ModelProgressView()
+                .padding(.horizontal, Theme.padding)
+                .padding(.top, 12)
+        case .ready:
+            StemResultsList()
+                .padding(.horizontal, Theme.padding)
+                .padding(.top, 12)
+        default:
+            // audioLoaded — clip info
+            ClipInfoRow()
+                .padding(.horizontal, Theme.padding)
+                .padding(.top, 6)
+        }
+    }
+}
+
+/// Player controls row: filename + duration.
+struct PlayerControlsRow: View {
+    @EnvironmentObject var viewState: ViewState
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Filename
+            if !viewState.filename.isEmpty {
+                Text(viewState.filename)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Theme.text)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer()
+
+            // Duration
+            if viewState.clipSampleRate > 0 {
+                let duration = Double(viewState.totalSamples) / Double(viewState.clipSampleRate)
+                Text(formatTime(duration))
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(Theme.textDim)
+            }
+        }
+    }
+}
+
+/// Clip selection info (shown in audioLoaded state).
+struct ClipInfoRow: View {
+    @EnvironmentObject var viewState: ViewState
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(String(format: "%.1fs", viewState.clipStartSeconds))
+            Text("\u{2013}")
+            Text(String(format: "%.1fs", viewState.clipEndSeconds))
+            Text("\u{00B7}")
+            Text(String(format: "%.1fs selected", viewState.clipDurationSeconds))
+                .foregroundColor(Theme.textDim)
+        }
+        .font(.system(size: 10, design: .monospaced))
+        .foregroundColor(Theme.textMicro)
+    }
+}
+
+/// Download progress (shown in downloading state).
+struct DownloadProgressBar: View {
+    @EnvironmentObject var viewState: ViewState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Downloading model\u{2026}")
+                .font(.system(size: 12))
+                .foregroundColor(Theme.textDim)
+
+            // Progress bar
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Theme.surface2)
+
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Theme.accentGradient)
+                        .frame(width: max(geo.size.width * CGFloat(viewState.progress), 0))
+                        .animation(.easeOut(duration: 0.3), value: viewState.progress)
+                }
+            }
+            .frame(height: 4)
+
+            Text(String(format: "%.0f%%", viewState.progress * 100))
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundColor(Theme.textMicro)
+        }
+    }
+}
+
+/// Separation progress matching web's ModelProgress component.
+/// Shows chunk progress bar + detail line + accent bar.
+struct ModelProgressView: View {
+    @EnvironmentObject var viewState: ViewState
+    @EnvironmentObject var callbackHandler: CallbackHandler
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Chunk progress row
+            HStack(spacing: 12) {
+                Text(viewState.stageLabel.isEmpty ? "Processing\u{2026}" : viewState.stageLabel)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundColor(Theme.textDim)
+                    .lineLimit(1)
+                    .frame(width: 160, alignment: .leading)
+
+                // Chunk bar (small, inline)
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Theme.surface2)
+
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Theme.accentGradient)
+                            .frame(width: max(geo.size.width * CGFloat(viewState.progress), 0))
+                            .animation(.easeOut(duration: 0.4), value: viewState.progress)
+                    }
+                }
+                .frame(height: 4)
+            }
+
+            // Full-width accent bar
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Theme.accentGradient)
+                .frame(height: 3)
+
+            // Cancel button
+            HStack {
+                Spacer()
+                Button(action: { callbackHandler.cancel() }) {
+                    Text("Cancel")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(Theme.textDim)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.cornerRadiusSm)
+                                .stroke(Theme.border, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+/// Model sidebar (right column). Matches web's ModelSidebar.
+struct ModelSidebar: View {
+    @EnvironmentObject var viewState: ViewState
+    @EnvironmentObject var callbackHandler: CallbackHandler
+    @State private var selectedModel: ModelVariantUI = .standard
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 8) {
+                Text("MODEL")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(Theme.textMicro)
+                    .tracking(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                ModelCard(
+                    title: "Standard",
+                    subtitle: "4 stems \u{00B7} 84 MB",
+                    isSelected: selectedModel == .standard
+                ) { selectedModel = .standard }
+
+                ModelCard(
+                    title: "6-Stem",
+                    subtitle: "6 stems \u{00B7} 55 MB",
+                    isSelected: selectedModel == .sixStem
+                ) { selectedModel = .sixStem }
+
+                ModelCard(
+                    title: "Fine-Tuned",
+                    subtitle: "4 stems \u{00B7} 336 MB",
+                    isSelected: selectedModel == .fineTuned
+                ) { selectedModel = .fineTuned }
+            }
+
+            Spacer()
+
+            // Run separation button
+            Button(action: startSeparation) {
+                Text("Run separation")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: Theme.cornerRadiusSm)
+                            .fill(Theme.accentGradient)
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(viewState.phase == .processing || viewState.phase == .downloading)
+            .opacity(viewState.phase == .processing || viewState.phase == .downloading ? 0.5 : 1)
+        }
+        .padding(14)
+        .frame(width: 200)
+        .background(Theme.surface)
+        .overlay(
+            Rectangle()
+                .fill(Theme.border.opacity(0.2))
+                .frame(width: 1),
+            alignment: .leading
+        )
+        .onAppear {
+            selectedModel = viewState.modelVariant
+        }
+    }
+
+    private func startSeparation() {
+        let clip = DemucsClip(
+            start_sample: viewState.clipStartSample,
+            end_sample: viewState.clipEndSample,
+            sample_rate: viewState.clipSampleRate
+        )
+        callbackHandler.separate(
+            variant: selectedModel.rawValue,
+            clip: clip
+        )
+    }
+}
+
+/// Stem results list (shown in ready state).
+struct StemResultsList: View {
+    @EnvironmentObject var viewState: ViewState
+    @State private var stemsAppeared = false
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 4) {
+                ForEach(Array(viewState.stems.enumerated()), id: \.element.id) { index, stem in
+                    StemStrip(stem: stem, busIndex: index)
+                        .opacity(stemsAppeared ? 1 : 0)
+                        .offset(y: stemsAppeared ? 0 : 8)
+                        .animation(
+                            Theme.springAnimation.delay(Double(index) * 0.06),
+                            value: stemsAppeared
+                        )
+                }
+            }
+        }
+        .onAppear { stemsAppeared = true }
+    }
+}
+
+// ── Header ─────────────────────────────────────────────────────────────────
+
+/// Compact header bar: gradient logo | separator | filename | badge.
+struct HeaderView: View {
+    @EnvironmentObject var viewState: ViewState
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("Demucs")
+                .font(.system(size: 15, weight: .heavy))
+                .foregroundStyle(Theme.accentGradient)
+
+            Rectangle()
+                .fill(Theme.border)
+                .frame(width: 1, height: 14)
+
+            if viewState.phase == .idle {
+                Text("Source Separation")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Theme.textMicro)
+            } else if !viewState.filename.isEmpty {
+                Text(viewState.filename)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Theme.textDim)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer()
+
+            statusBadge
+                .animation(Theme.quickAnimation, value: viewState.phase)
+        }
+        .padding(.horizontal, Theme.padding)
+        .padding(.vertical, 12)
+        .overlay(
+            Rectangle()
+                .fill(Theme.border.opacity(0.25))
+                .frame(height: 1),
+            alignment: .bottom
+        )
+    }
+
+    @ViewBuilder
+    private var statusBadge: some View {
+        switch viewState.phase {
+        case .processing:
+            BadgePill(text: "Separating\u{2026}", color: Theme.accent, pulseDot: true)
+        case .ready:
+            BadgePill(text: "Complete", color: Theme.success)
+        case .downloading:
+            BadgePill(text: "Downloading", color: Theme.accentCool, pulseDot: true)
+        case .error:
+            BadgePill(text: "Error", color: Theme.errorRed)
+        default:
+            EmptyView()
+        }
+    }
+}
+
+/// Compact badge pill for header status.
+struct BadgePill: View {
+    let text: String
+    let color: Color
+    var pulseDot: Bool = false
+
+    @State private var dotAnimating = false
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if pulseDot {
+                Circle()
+                    .fill(color)
+                    .frame(width: 4, height: 4)
+                    .opacity(dotAnimating ? 1.0 : 0.3)
+                    .animation(
+                        .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                        value: dotAnimating
+                    )
+                    .onAppear { dotAnimating = true }
+            }
+            Text(text)
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundColor(color)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(color.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+}
+
+/// Model card with gradient border when selected.
+struct ModelCard: View {
+    let title: String
+    let subtitle: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(isSelected ? Theme.accentCool : Theme.text)
+                Text(subtitle)
+                    .font(.system(size: 10))
+                    .foregroundColor(Theme.textDim)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.cornerRadiusSm)
+                    .fill(
+                        isSelected
+                            ? Theme.accentCool.opacity(0.06)
+                            : (isHovered ? Theme.surface2.opacity(0.3) : Color.clear)
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.cornerRadiusSm)
+                    .strokeBorder(
+                        isSelected
+                            ? AnyShapeStyle(Theme.accentGradient.opacity(0.6))
+                            : AnyShapeStyle(
+                                isHovered
+                                    ? Theme.border.opacity(0.45)
+                                    : Theme.border.opacity(0.2)
+                              ),
+                        lineWidth: 1
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { h in
+            withAnimation(Theme.quickAnimation) { isHovered = h }
+        }
+        .animation(Theme.quickAnimation, value: isSelected)
+    }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+private func formatTime(_ seconds: Double) -> String {
+    let m = Int(seconds) / 60
+    let s = Int(seconds) % 60
+    return String(format: "%d:%02d", m, s)
+}

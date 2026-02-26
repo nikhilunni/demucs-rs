@@ -1,0 +1,1181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Demucs Plugin — DAW UI Mockup</title>
+<script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    /* Palette — exactly matching web/src/design/tokens.ts */
+    --bg: #0b0a10;
+    --surface: #14131f;
+    --surface2: #1e1d2e;
+    --border: #2a2940;
+
+    --text: #e8e5f0;
+    --text-dim: #6e6b82;
+    --text-micro: #4a4860;
+
+    --accent: #f07a5c;
+    --accent-cool: #7c6ff0;
+
+    --stem-drums: #f0a05c;
+    --stem-bass: #b07af0;
+    --stem-other: #6ee7a0;
+    --stem-vocals: #f0d75c;
+
+    --success: #5ab87a;
+    --error-red: #c45555;
+
+    --radius: 8px;
+    --radius-sm: 6px;
+    --pad: 18px;
+
+    --font-display: 'Syne', sans-serif;
+    --font-body: 'Outfit', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  body {
+    font-family: var(--font-body);
+    background: #0a0a0a;
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px;
+    gap: 48px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .section-label {
+    font-family: var(--font-display);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-micro);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    max-width: 700px;
+    width: 100%;
+  }
+
+  /* ── Plugin Frame ──────────────────────────────── */
+  .plugin {
+    width: 700px;
+    height: 500px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--bg);
+    border: 1px solid rgba(255,255,255,0.04);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+
+  /* ── Header ────────────────────────────────────── */
+  .hdr {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px var(--pad);
+    border-bottom: 1px solid rgba(42,41,64,0.25);
+    flex-shrink: 0;
+  }
+  .hdr-logo {
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    background: linear-gradient(90deg, var(--accent-cool), var(--accent));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .hdr-sep {
+    width: 1px;
+    height: 14px;
+    background: var(--border);
+  }
+  .hdr-file {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-dim);
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hdr-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.2px;
+  }
+  .hdr-badge.processing {
+    color: var(--accent);
+    background: rgba(240,122,92,0.08);
+  }
+  .hdr-badge.processing .bdot {
+    width: 4px; height: 4px; border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 1.2s ease-in-out infinite alternate;
+  }
+  .hdr-badge.ready {
+    color: var(--success);
+    background: rgba(90,184,122,0.08);
+  }
+  .hdr-badge.error {
+    color: var(--error-red);
+    background: rgba(196,85,85,0.08);
+  }
+  @keyframes pulse {
+    0% { opacity: 0.3; } 100% { opacity: 1; }
+  }
+
+  /* ── IDLE STATE ────────────────────────────────── */
+  .idle-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    padding: var(--pad);
+  }
+  .drop-zone {
+    width: 380px;
+    padding: 48px 40px;
+    border-radius: var(--radius);
+    background: var(--surface);
+    border: 1px dashed var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    cursor: pointer;
+    transition: border-color 0.2s ease, background 0.2s ease;
+  }
+  .drop-zone:hover {
+    border-color: rgba(124,111,240,0.35);
+    background: rgba(20,19,31,0.9);
+  }
+  .drop-icon-wrap {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: rgba(124,111,240,0.06);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .drop-icon-svg {
+    width: 22px;
+    height: 22px;
+    color: var(--accent-cool);
+    opacity: 0.7;
+  }
+  .drop-title {
+    font-family: var(--font-display);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .drop-sub {
+    font-size: 11px;
+    color: var(--text-micro);
+    text-align: center;
+    line-height: 1.5;
+  }
+  .drop-formats {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .drop-fmt {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-micro);
+    background: rgba(42,41,64,0.25);
+    padding: 2px 6px;
+    border-radius: 3px;
+    letter-spacing: 0.5px;
+  }
+
+  /* ── AUDIO LOADED STATE ────────────────────────── */
+  .loaded-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .with-sidebar { display: flex; flex: 1; min-height: 0; }
+  .main-col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+  .waveform-row { padding: 14px var(--pad) 0; }
+  .waveform-box {
+    height: 100px;
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    border: 1px solid rgba(42,41,64,0.3);
+    position: relative;
+    overflow: hidden;
+  }
+  .waveform-box canvas { width: 100%; height: 100%; display: block; }
+  .wf-dim-l, .wf-dim-r {
+    position: absolute; top: 0; bottom: 0;
+    background: rgba(11,10,16,0.5);
+  }
+  .wf-dim-l { left: 0; width: 6%; }
+  .wf-dim-r { right: 0; width: 12%; }
+  .wf-handle {
+    position: absolute; top: 0; bottom: 0; width: 3px;
+    background: var(--accent-cool);
+    opacity: 0.7;
+    cursor: ew-resize;
+  }
+  .wf-handle.l { left: 6%; }
+  .wf-handle.r { right: 12%; }
+  .clip-row {
+    display: flex; align-items: center; gap: 5px;
+    padding: 6px var(--pad);
+    font-size: 10px; font-family: var(--font-mono);
+    color: var(--text-micro);
+  }
+  .clip-row .v { color: var(--text-dim); }
+
+  /* Sidebar */
+  .side-col {
+    width: 200px;
+    flex-shrink: 0;
+    background: var(--surface);
+    border-left: 1px solid rgba(42,41,64,0.2);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .side-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-micro);
+    letter-spacing: 1px;
+  }
+
+  /* Model cards */
+  .mcard {
+    padding: 10px 11px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    border: 1px solid rgba(42,41,64,0.2);
+    cursor: pointer;
+    transition: all 0.12s ease;
+  }
+  .mcard:hover { border-color: rgba(42,41,64,0.45); background: rgba(30,29,46,0.3); }
+  .mcard.sel {
+    background: rgba(124,111,240,0.06);
+    border: none;
+    position: relative;
+    padding: 11px 12px; /* +1px to compensate for removed border */
+  }
+  .mcard.sel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-sm);
+    padding: 1px;
+    background: linear-gradient(135deg, var(--accent-cool), var(--accent));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    opacity: 0.6;
+  }
+  .mcard-name {
+    font-family: var(--font-display);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+  .mcard.sel .mcard-name { color: var(--accent-cool); }
+  .mcard-meta {
+    font-size: 10px;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+  }
+  .mcard-desc { color: var(--text-micro); }
+
+  .sep-btn {
+    margin-top: auto;
+    padding: 10px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: linear-gradient(90deg, var(--accent-cool), var(--accent));
+    color: white;
+    font-family: var(--font-body);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 0;
+    transition: opacity 0.12s ease;
+    letter-spacing: 0.2px;
+  }
+  .sep-btn:hover { opacity: 0.9; }
+
+  /* ── PROCESSING STATE ──────────────────────────── */
+  .proc-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .unbraid-area {
+    flex: 1;
+    padding: var(--pad);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .unbraid-canvas-wrap {
+    flex: 1;
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    border: 1px solid rgba(42,41,64,0.2);
+    overflow: hidden;
+    position: relative;
+  }
+  .unbraid-canvas-wrap canvas { width: 100%; height: 100%; display: block; }
+  /* Vertical progress line */
+  .unbraid-cursor {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 1px;
+    background: rgba(255,255,255,0.15);
+    left: 67%;
+    pointer-events: none;
+  }
+  .unbraid-cursor::after {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0;
+    left: -3px; right: -3px;
+    background: linear-gradient(180deg, rgba(124,111,240,0.3), rgba(240,122,92,0.3));
+    filter: blur(4px);
+  }
+  .proc-footer {
+    display: flex;
+    align-items: center;
+    padding: 10px 0 0;
+    gap: 12px;
+  }
+  .proc-pct {
+    font-size: 22px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: var(--text);
+    letter-spacing: -0.5px;
+    flex-shrink: 0;
+  }
+  .proc-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .proc-stage {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-dim);
+  }
+  .proc-sub {
+    font-size: 10px;
+    color: var(--text-micro);
+    font-family: var(--font-mono);
+  }
+  .proc-legend {
+    display: flex;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .proc-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 9px;
+    font-family: var(--font-mono);
+    color: var(--text-micro);
+  }
+  .proc-legend-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+  }
+  .cancel-btn {
+    padding: 5px 14px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: var(--font-body);
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.12s ease;
+    flex-shrink: 0;
+  }
+  .cancel-btn:hover { border-color: rgba(42,41,64,0.6); color: var(--text); }
+
+  /* ── READY / STEMS STATE ───────────────────────── */
+  .ready-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+  /* Waveform in ready state */
+  .ready-wf-row { padding: 14px var(--pad) 0; }
+  .ready-wf-box {
+    height: 64px;
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    border: 1px solid rgba(42,41,64,0.2);
+    overflow: hidden;
+  }
+  .ready-wf-box canvas { width: 100%; height: 100%; display: block; }
+
+  .stems-area {
+    flex: 1;
+    padding: 10px var(--pad);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow-y: auto;
+  }
+  .stem-strip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    border: 1px solid rgba(42,41,64,0.15);
+    transition: border-color 0.1s ease;
+  }
+  .stem-strip:hover { border-color: rgba(42,41,64,0.35); }
+  .stem-color {
+    width: 3px;
+    height: 28px;
+    border-radius: 1.5px;
+    flex-shrink: 0;
+  }
+  .stem-info { flex: 0 0 56px; }
+  .stem-name {
+    font-family: var(--font-display);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1;
+    margin-bottom: 2px;
+  }
+  .stem-sub {
+    font-size: 9px;
+    font-weight: 500;
+    font-family: var(--font-mono);
+  }
+  .stem-wf {
+    flex: 1;
+    height: 28px;
+    border-radius: 3px;
+    background: rgba(20,19,31,0.5);
+    overflow: hidden;
+  }
+  .stem-wf canvas { width: 100%; height: 100%; display: block; }
+  .stem-btns { display: flex; gap: 3px; flex-shrink: 0; }
+  .sm-btn {
+    width: 22px; height: 22px;
+    border-radius: 4px;
+    border: 1px solid rgba(42,41,64,0.3);
+    background: transparent;
+    color: var(--text-micro);
+    font-size: 9px;
+    font-weight: 700;
+    font-family: var(--font-body);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.1s ease;
+  }
+  .sm-btn:hover { color: var(--text-dim); border-color: rgba(42,41,64,0.5); }
+  .sm-btn.solo-on { background: rgba(124,111,240,0.15); color: var(--accent-cool); border-color: rgba(124,111,240,0.3); }
+  .sm-btn.mute-on { background: rgba(240,122,92,0.12); color: var(--accent); border-color: rgba(240,122,92,0.25); }
+  .stem-vol {
+    width: 50px;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--border);
+    outline: none;
+    flex-shrink: 0;
+  }
+  .stem-vol::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    cursor: pointer;
+  }
+  .stem-drag {
+    width: 20px;
+    height: 28px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+    flex-shrink: 0;
+    color: var(--text-micro);
+    transition: color 0.1s;
+  }
+  .stem-drag:hover { color: var(--text-dim); }
+  .drag-dots {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .drag-dots span { display: flex; gap: 2px; }
+  .drag-dots span::before, .drag-dots span::after {
+    content: '';
+    width: 2px; height: 2px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .output-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px var(--pad);
+    border-top: 1px solid rgba(42,41,64,0.15);
+    flex-shrink: 0;
+  }
+  .output-hint {
+    font-size: 10px;
+    color: var(--text-micro);
+  }
+  .output-bus {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+  }
+
+  /* ── Error ─────────────────────────────────────── */
+  .err-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: var(--pad);
+  }
+  .err-icon {
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    background: rgba(196,85,85,0.06);
+    border: 1px solid rgba(196,85,85,0.12);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--error-red);
+    font-size: 20px;
+  }
+  .err-title {
+    font-family: var(--font-display);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .err-msg {
+    font-size: 12px;
+    color: var(--text-dim);
+    text-align: center;
+    max-width: 360px;
+    line-height: 1.6;
+  }
+  .retry-btn {
+    padding: 6px 18px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .sp { flex: 1; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════
+     1. IDLE
+     ═══════════════════════════════════════════════════ -->
+<div class="section-label">1 — Idle</div>
+<div class="plugin">
+  <div class="hdr">
+    <div class="hdr-logo">Demucs</div>
+    <div class="hdr-sep"></div>
+    <div class="hdr-file" style="color:var(--text-micro);">Source Separation</div>
+  </div>
+  <div class="idle-body">
+    <div class="drop-zone">
+      <div class="drop-icon-wrap">
+        <svg class="drop-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+      </div>
+      <div class="drop-title">Drop audio here</div>
+      <div class="drop-sub">Drag from your DAW, Finder, or click to browse</div>
+      <div class="drop-formats">
+        <span class="drop-fmt">WAV</span>
+        <span class="drop-fmt">AIFF</span>
+        <span class="drop-fmt">MP3</span>
+        <span class="drop-fmt">FLAC</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     2. AUDIO LOADED
+     ═══════════════════════════════════════════════════ -->
+<div class="section-label">2 — Audio Loaded</div>
+<div class="plugin">
+  <div class="hdr">
+    <div class="hdr-logo">Demucs</div>
+    <div class="hdr-sep"></div>
+    <div class="hdr-file">ambience_forest_birds.wav</div>
+  </div>
+  <div class="loaded-body">
+    <div class="with-sidebar">
+      <div class="main-col">
+        <div class="waveform-row">
+          <div class="waveform-box">
+            <canvas id="wf-loaded"></canvas>
+            <div class="wf-dim-l"></div>
+            <div class="wf-dim-r"></div>
+            <div class="wf-handle l"></div>
+            <div class="wf-handle r"></div>
+          </div>
+        </div>
+        <div class="clip-row">
+          <span>2.4s</span>
+          <span>&ndash;</span>
+          <span>35.8s</span>
+          <span>&middot;</span>
+          <span class="v">33.4s selected</span>
+        </div>
+        <div class="sp"></div>
+      </div>
+      <div class="side-col">
+        <div class="side-label">MODEL</div>
+        <div class="mcard sel">
+          <div class="mcard-name">Standard</div>
+          <div class="mcard-meta">
+            <span>4 stems &middot; 84 MB</span>
+          </div>
+        </div>
+        <div class="mcard">
+          <div class="mcard-name">Fine-Tuned</div>
+          <div class="mcard-meta">
+            <span>4 stems &middot; 336 MB</span>
+          </div>
+        </div>
+        <div class="mcard">
+          <div class="mcard-name">6-Stem</div>
+          <div class="mcard-meta">
+            <span>6 stems &middot; 55 MB</span>
+          </div>
+        </div>
+        <div class="sp"></div>
+        <button class="sep-btn">Separate</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     3. PROCESSING
+     ═══════════════════════════════════════════════════ -->
+<div class="section-label">3 — Processing</div>
+<div class="plugin">
+  <div class="hdr">
+    <div class="hdr-logo">Demucs</div>
+    <div class="hdr-sep"></div>
+    <div class="hdr-file">ambience_forest_birds.wav</div>
+    <div class="hdr-badge processing"><span class="bdot"></span>Separating</div>
+  </div>
+  <div class="proc-body">
+    <div class="unbraid-area">
+      <div class="unbraid-canvas-wrap">
+        <canvas id="unbraid"></canvas>
+        <div class="unbraid-cursor"></div>
+      </div>
+      <div class="proc-footer">
+        <div class="proc-pct">67%</div>
+        <div class="proc-info">
+          <div class="proc-stage">Processing frequency branch — layer 3/4</div>
+          <div class="proc-sub">Chunk 18 of 27 &middot; ~45s remaining</div>
+        </div>
+        <div class="proc-legend">
+          <div class="proc-legend-item"><div class="proc-legend-dot" style="background:var(--stem-drums);"></div>Drums</div>
+          <div class="proc-legend-item"><div class="proc-legend-dot" style="background:var(--stem-bass);"></div>Bass</div>
+          <div class="proc-legend-item"><div class="proc-legend-dot" style="background:var(--stem-other);"></div>Other</div>
+          <div class="proc-legend-item"><div class="proc-legend-dot" style="background:var(--stem-vocals);"></div>Vocals</div>
+        </div>
+        <button class="cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     4. READY — STEMS
+     ═══════════════════════════════════════════════════ -->
+<div class="section-label">4 — Ready</div>
+<div class="plugin">
+  <div class="hdr">
+    <div class="hdr-logo">Demucs</div>
+    <div class="hdr-sep"></div>
+    <div class="hdr-file">ambience_forest_birds.wav</div>
+    <div class="hdr-badge ready">Complete</div>
+  </div>
+  <div class="ready-body">
+    <div class="ready-wf-row">
+      <div class="ready-wf-box">
+        <canvas id="wf-ready"></canvas>
+      </div>
+    </div>
+    <div class="stems-area">
+      <!-- Drums -->
+      <div class="stem-strip">
+        <div class="stem-color" style="background:var(--stem-drums);"></div>
+        <div class="stem-info">
+          <div class="stem-name">Drums</div>
+          <div class="stem-sub" style="color:var(--stem-drums);">1-2</div>
+        </div>
+        <div class="stem-wf"><canvas class="swf" data-color="240,160,92" data-seed="42"></canvas></div>
+        <div class="stem-btns">
+          <button class="sm-btn">S</button>
+          <button class="sm-btn">M</button>
+        </div>
+        <input type="range" class="stem-vol" min="0" max="100" value="80">
+        <div class="stem-drag"><div class="drag-dots"><span></span><span></span><span></span></div></div>
+      </div>
+      <!-- Bass -->
+      <div class="stem-strip">
+        <div class="stem-color" style="background:var(--stem-bass);"></div>
+        <div class="stem-info">
+          <div class="stem-name">Bass</div>
+          <div class="stem-sub" style="color:var(--stem-bass);">3-4</div>
+        </div>
+        <div class="stem-wf"><canvas class="swf" data-color="176,122,240" data-seed="73"></canvas></div>
+        <div class="stem-btns">
+          <button class="sm-btn">S</button>
+          <button class="sm-btn">M</button>
+        </div>
+        <input type="range" class="stem-vol" min="0" max="100" value="80">
+        <div class="stem-drag"><div class="drag-dots"><span></span><span></span><span></span></div></div>
+      </div>
+      <!-- Other -->
+      <div class="stem-strip">
+        <div class="stem-color" style="background:var(--stem-other);"></div>
+        <div class="stem-info">
+          <div class="stem-name">Other</div>
+          <div class="stem-sub" style="color:var(--stem-other);">5-6</div>
+        </div>
+        <div class="stem-wf"><canvas class="swf" data-color="110,231,160" data-seed="17"></canvas></div>
+        <div class="stem-btns">
+          <button class="sm-btn solo-on">S</button>
+          <button class="sm-btn">M</button>
+        </div>
+        <input type="range" class="stem-vol" min="0" max="100" value="80">
+        <div class="stem-drag"><div class="drag-dots"><span></span><span></span><span></span></div></div>
+      </div>
+      <!-- Vocals -->
+      <div class="stem-strip">
+        <div class="stem-color" style="background:var(--stem-vocals);"></div>
+        <div class="stem-info">
+          <div class="stem-name">Vocals</div>
+          <div class="stem-sub" style="color:var(--stem-vocals);">7-8</div>
+        </div>
+        <div class="stem-wf"><canvas class="swf" data-color="240,215,92" data-seed="91"></canvas></div>
+        <div class="stem-btns">
+          <button class="sm-btn">S</button>
+          <button class="sm-btn mute-on">M</button>
+        </div>
+        <input type="range" class="stem-vol" min="0" max="100" value="0">
+        <div class="stem-drag"><div class="drag-dots"><span></span><span></span><span></span></div></div>
+      </div>
+    </div>
+    <div class="output-row">
+      <div class="output-hint">Drop a new file to separate</div>
+      <div class="output-bus">4 stereo outputs</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     5. ERROR
+     ═══════════════════════════════════════════════════ -->
+<div class="section-label">5 — Error</div>
+<div class="plugin">
+  <div class="hdr">
+    <div class="hdr-logo">Demucs</div>
+    <div class="hdr-sep"></div>
+    <div class="hdr-file">ambience_forest_birds.wav</div>
+    <div class="hdr-badge error">Error</div>
+  </div>
+  <div class="err-body">
+    <div class="err-icon">!</div>
+    <div class="err-title">Separation failed</div>
+    <div class="err-msg">GPU out of memory. Try a shorter clip or close other GPU-intensive applications.</div>
+    <button class="retry-btn">Dismiss</button>
+  </div>
+</div>
+
+<script>
+function seededRand(seed) {
+  return function() {
+    seed = (seed * 16807 + 0) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+}
+
+function setupCanvas(canvas) {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  return { ctx, w: rect.width, h: rect.height, dpr };
+}
+
+// ── Magma colormap from tokens.ts ─────────────────────────────
+const MAGMA = [
+  [0.0, 0,0,4], [0.1, 20,14,54], [0.2, 59,15,112], [0.3, 100,26,128],
+  [0.4, 140,41,129], [0.5, 183,55,121], [0.6, 222,73,104],
+  [0.7, 247,115,92], [0.8, 254,176,120], [0.9, 253,226,163], [1.0, 252,253,191],
+];
+
+function magma(t) {
+  t = Math.max(0, Math.min(1, t));
+  for (let i = 0; i < MAGMA.length - 1; i++) {
+    if (t <= MAGMA[i+1][0]) {
+      const f = (t - MAGMA[i][0]) / (MAGMA[i+1][0] - MAGMA[i][0]);
+      return [
+        Math.round(MAGMA[i][1] + (MAGMA[i+1][1] - MAGMA[i][1]) * f),
+        Math.round(MAGMA[i][2] + (MAGMA[i+1][2] - MAGMA[i][2]) * f),
+        Math.round(MAGMA[i][3] + (MAGMA[i+1][3] - MAGMA[i][3]) * f),
+      ];
+    }
+  }
+  return [252, 253, 191];
+}
+
+// Tint magma toward a stem color: blend = 0 is pure magma, 1 is pure stem
+function tintedMagma(t, stemRGB, blend) {
+  const [mr, mg, mb] = magma(t);
+  const [sr, sg, sb] = stemRGB;
+  // Use magma brightness but shift hue toward stem color
+  const brightness = (mr + mg + mb) / (3 * 255);
+  const r = Math.round(mr * (1 - blend) + sr * brightness * 1.2 * blend);
+  const g = Math.round(mg * (1 - blend) + sg * brightness * 1.2 * blend);
+  const b = Math.round(mb * (1 - blend) + sb * brightness * 1.2 * blend);
+  return [Math.min(255,r), Math.min(255,g), Math.min(255,b)];
+}
+
+// ── Generate fake spectrogram data ────────────────────────────
+// Returns 2D array [timeCol][freqRow] of 0..1 intensity values
+// seed controls the random pattern, character shapes the spectral profile
+function genSpectrogram(cols, rows, seed, character) {
+  const rand = seededRand(seed);
+  const data = [];
+
+  // Base frequency profile — more energy at low frequencies
+  const freqProfile = [];
+  for (let y = 0; y < rows; y++) {
+    const f = y / rows; // 0 = low freq, 1 = high freq
+    let base;
+    switch (character) {
+      case 'drums':
+        // Transient-heavy: broad spectrum with emphasis on low-mid
+        base = 0.6 * Math.exp(-f * 2.5) + 0.3 * Math.exp(-((f - 0.15) ** 2) / 0.01);
+        break;
+      case 'bass':
+        // Very concentrated at low frequencies
+        base = 0.9 * Math.exp(-f * 6) + 0.05;
+        break;
+      case 'vocals':
+        // Mid-range focused with harmonics
+        base = 0.7 * Math.exp(-((f - 0.25) ** 2) / 0.02) + 0.3 * Math.exp(-((f - 0.45) ** 2) / 0.015);
+        break;
+      case 'other':
+        // Spread across mid-high
+        base = 0.5 * Math.exp(-((f - 0.35) ** 2) / 0.04) + 0.2 * Math.exp(-f * 1.5);
+        break;
+      default: // mixed
+        base = 0.7 * Math.exp(-f * 2) + 0.2 * Math.exp(-((f - 0.3) ** 2) / 0.03);
+    }
+    freqProfile.push(base);
+  }
+
+  // Generate time-varying noise
+  for (let x = 0; x < cols; x++) {
+    const col = [];
+    // Time-varying envelope
+    const env = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(x * 0.05 + seed));
+    const burst = rand() > 0.92 ? 1.5 : 1.0; // occasional transients
+
+    for (let y = 0; y < rows; y++) {
+      let val = freqProfile[y] * env * burst;
+      // Add noise texture
+      val *= 0.5 + 0.5 * rand();
+      // Add some harmonic structure (faint horizontal lines)
+      if (character === 'vocals' || character === 'other') {
+        const harmonic = Math.sin(y * 0.8 + seed * 0.1) * 0.15;
+        val += Math.max(0, harmonic) * freqProfile[y];
+      }
+      col.push(Math.max(0, Math.min(1, val)));
+    }
+    data.push(col);
+  }
+
+  // Temporal smoothing
+  for (let y = 0; y < rows; y++) {
+    for (let x = 1; x < cols - 1; x++) {
+      data[x][y] = data[x][y] * 0.6 + (data[x-1][y] + data[x+1][y]) * 0.2;
+    }
+  }
+  // Frequency smoothing
+  for (let x = 0; x < cols; x++) {
+    for (let y = 1; y < rows - 1; y++) {
+      data[x][y] = data[x][y] * 0.6 + (data[x][y-1] + data[x][y+1]) * 0.2;
+    }
+  }
+
+  return data;
+}
+
+// ── Render spectrogram to ImageData ───────────────────────────
+function renderSpectrogram(ctx, data, x, y, w, h, colorFn) {
+  const cols = data.length;
+  const rows = data[0].length;
+  const imgData = ctx.createImageData(Math.ceil(w), Math.ceil(h));
+  const pw = imgData.width, ph = imgData.height;
+
+  for (let px = 0; px < pw; px++) {
+    const col = Math.floor((px / pw) * cols);
+    for (let py = 0; py < ph; py++) {
+      // Y axis: top = high freq, bottom = low freq (flip)
+      const row = Math.floor(((ph - 1 - py) / ph) * rows);
+      const val = data[Math.min(col, cols-1)][Math.min(row, rows-1)];
+      const [r, g, b] = colorFn(val);
+      const idx = (py * pw + px) * 4;
+      imgData.data[idx] = r;
+      imgData.data[idx+1] = g;
+      imgData.data[idx+2] = b;
+      imgData.data[idx+3] = 255;
+    }
+  }
+
+  // Draw at pixel level then stretch via drawImage for smooth scaling
+  const offscreen = document.createElement('canvas');
+  offscreen.width = pw;
+  offscreen.height = ph;
+  offscreen.getContext('2d').putImageData(imgData, 0, 0);
+  ctx.drawImage(offscreen, x, y, w, h);
+}
+
+// ── Main spectrogram (Audio Loaded / Ready) ───────────────────
+function drawMainSpectrogram(canvasId) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const { ctx, w, h } = setupCanvas(canvas);
+  const cols = Math.floor(w);
+  const rows = Math.floor(h * 0.8);
+  const data = genSpectrogram(cols, rows, 42, 'mixed');
+  renderSpectrogram(ctx, data, 0, 0, w, h, t => magma(t));
+}
+
+// ── Unbraiding spectrogram visualization ──────────────────────
+// All stems share the same frequency axis. Each stem is rendered
+// with its stem color at intensity-based alpha and composited via
+// additive blending. On the right side: mixed magma spectrogram.
+// The crossfade shows the magma "splitting" into colored layers.
+function drawUnbraid(canvasId, progress) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const { ctx, w, h } = setupCanvas(canvas);
+
+  const stems = [
+    { color: [240,160,92],  seed: 42, char: 'drums' },
+    { color: [176,122,240], seed: 73, char: 'bass' },
+    { color: [110,231,160], seed: 17, char: 'other' },
+    { color: [240,215,92],  seed: 91, char: 'vocals' },
+  ];
+
+  // All spectrograms share the same frequency resolution (full canvas height)
+  const cols = Math.floor(w * 0.5);
+  const rows = Math.floor(h * 0.8);
+  const stemSpecs = stems.map(s => genSpectrogram(cols, rows, s.seed, s.char));
+
+  // Mixed spectrogram (same resolution — same frequency axis)
+  const mixSpec = genSpectrogram(cols, rows, 777, 'mixed');
+
+  const splitX = progress * w;
+  const transW = 60;
+
+  // Pre-render each stem as a colored layer with alpha = intensity
+  // These get additively blended to form the "separated" view
+  const stemCanvases = stems.map((s, si) => {
+    const off = document.createElement('canvas');
+    off.width = cols;
+    off.height = rows;
+    const offCtx = off.getContext('2d');
+    const imgData = offCtx.createImageData(cols, rows);
+    const [sr, sg, sb] = s.color;
+    for (let px = 0; px < cols; px++) {
+      for (let py = 0; py < rows; py++) {
+        const row = rows - 1 - py; // flip Y: top=high freq
+        const val = stemSpecs[si][Math.min(px, cols-1)][Math.min(row, rows-1)];
+        // Color brightness scales with intensity, alpha carries opacity
+        const intensity = Math.pow(val, 0.65);
+        const idx = (py * cols + px) * 4;
+        imgData.data[idx]   = Math.round(sr * intensity);
+        imgData.data[idx+1] = Math.round(sg * intensity);
+        imgData.data[idx+2] = Math.round(sb * intensity);
+        imgData.data[idx+3] = Math.round(intensity * 220);
+      }
+    }
+    offCtx.putImageData(imgData, 0, 0);
+    return off;
+  });
+
+  // Composite all stems into a single "separated" offscreen canvas
+  // using additive blending so overlapping stems create bright blends
+  const sepCanvas = document.createElement('canvas');
+  sepCanvas.width = Math.ceil(w);
+  sepCanvas.height = Math.ceil(h);
+  const sepCtx = sepCanvas.getContext('2d');
+  sepCtx.fillStyle = '#0b0a10';
+  sepCtx.fillRect(0, 0, w, h);
+  sepCtx.globalCompositeOperation = 'screen';
+  for (const off of stemCanvases) {
+    sepCtx.drawImage(off, 0, 0, cols, rows, 0, 0, w, h);
+  }
+  sepCtx.globalCompositeOperation = 'source-over';
+
+  // Pre-render mixed magma spectrogram at the same scale
+  const mixCanvas = document.createElement('canvas');
+  mixCanvas.width = cols;
+  mixCanvas.height = rows;
+  const mixCtx = mixCanvas.getContext('2d');
+  const mixImg = mixCtx.createImageData(cols, rows);
+  for (let px = 0; px < cols; px++) {
+    for (let py = 0; py < rows; py++) {
+      const row = rows - 1 - py;
+      const val = mixSpec[Math.min(px, cols-1)][Math.min(row, rows-1)];
+      const [r, g, b] = magma(val);
+      const idx = (py * cols + px) * 4;
+      mixImg.data[idx] = r;
+      mixImg.data[idx+1] = g;
+      mixImg.data[idx+2] = b;
+      mixImg.data[idx+3] = 255;
+    }
+  }
+  mixCtx.putImageData(mixImg, 0, 0);
+
+  // Background
+  ctx.fillStyle = '#0b0a10';
+  ctx.fillRect(0, 0, w, h);
+
+  // Draw separated region (left of transition)
+  if (splitX > 0) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, Math.max(0, splitX - transW * 0.3), h);
+    ctx.clip();
+    ctx.drawImage(sepCanvas, 0, 0);
+    ctx.restore();
+  }
+
+  // Draw mixed region (right of transition) — same full height
+  if (splitX < w) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(Math.min(w, splitX + transW * 0.5), 0, w, h);
+    ctx.clip();
+    ctx.drawImage(mixCanvas, 0, 0, cols, rows, 0, 0, w, h);
+    ctx.restore();
+  }
+
+  // Transition zone — smooth crossfade between separated and mixed
+  const tzLeft = Math.max(0, splitX - transW * 0.3);
+  const tzRight = Math.min(w, splitX + transW * 0.5);
+  if (tzRight > tzLeft) {
+    for (let px = Math.floor(tzLeft); px < Math.ceil(tzRight); px++) {
+      const t = (px - tzLeft) / (tzRight - tzLeft);
+      const sep = 1 - t * t * (3 - 2 * t); // smoothstep
+
+      if (sep > 0.01) {
+        ctx.save();
+        ctx.globalAlpha = sep;
+        ctx.beginPath();
+        ctx.rect(px, 0, 1, h);
+        ctx.clip();
+        ctx.drawImage(sepCanvas, 0, 0);
+        ctx.restore();
+      }
+
+      if (1 - sep > 0.01) {
+        ctx.save();
+        ctx.globalAlpha = 1 - sep;
+        ctx.beginPath();
+        ctx.rect(px, 0, 1, h);
+        ctx.clip();
+        ctx.drawImage(mixCanvas, 0, 0, cols, rows, 0, 0, w, h);
+        ctx.restore();
+      }
+    }
+  }
+}
+
+// ── Stem strip spectrograms (Ready state) ─────────────────────
+function drawStemSpectrograms() {
+  const stemChars = { '42': 'drums', '73': 'bass', '17': 'other', '91': 'vocals' };
+  const stemColors = {
+    '42': [240,160,92], '73': [176,122,240],
+    '17': [110,231,160], '91': [240,215,92]
+  };
+
+  document.querySelectorAll('.swf').forEach(canvas => {
+    const { ctx, w, h } = setupCanvas(canvas);
+    const seed = canvas.dataset.seed || '42';
+    const color = stemColors[seed] || [124,111,240];
+    const char = stemChars[seed] || 'mixed';
+    const cols = Math.floor(w * 0.5);
+    const rows = Math.floor(h * 0.8);
+    const data = genSpectrogram(cols, rows, parseInt(seed), char);
+    renderSpectrogram(ctx, data, 0, 0, w, h, t => tintedMagma(t, color, 0.45));
+  });
+}
+
+window.addEventListener('load', () => {
+  drawMainSpectrogram('wf-loaded');
+  drawMainSpectrogram('wf-ready');
+  drawUnbraid('unbraid', 0.67);
+  drawStemSpectrograms();
+});
+</script>
+</body>
+</html>
