@@ -142,6 +142,7 @@ jobs:
   build-plugin:
     name: Plugin (macOS)
     runs-on: macos-latest
+    environment: release
     steps:
       - uses: actions/checkout@v4
 
@@ -156,8 +157,61 @@ jobs:
       - name: Bundle plugin
         run: cargo xtask bundle demucs-plugin --release --target aarch64-apple-darwin
 
+      - name: Install signing certificate
+        env:
+          P12_BASE64: ${{ secrets.DEVELOPER_ID_CERT_P12 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
+        run: |
+          echo "$P12_BASE64" | base64 --decode > cert.p12
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security import cert.p12 -k build.keychain -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+          rm cert.p12
+
+      - name: Sign plugin bundles
+        run: |
+          codesign --force --deep --timestamp \
+            --options runtime \
+            --sign "Developer ID Application: Nikhil Unni (${{ secrets.APPLE_TEAM_ID }})" \
+            target/bundled/Demucs.vst3
+          codesign --force --deep --timestamp \
+            --options runtime \
+            --sign "Developer ID Application: Nikhil Unni (${{ secrets.APPLE_TEAM_ID }})" \
+            target/bundled/Demucs.clap
+
       - name: Package plugin bundles
         run: |
+          cd target/bundled
+          zip -r ../../Demucs-vst3-aarch64-apple-darwin.zip Demucs.vst3
+          zip -r ../../Demucs-clap-aarch64-apple-darwin.zip Demucs.clap
+
+      - name: Notarize plugin bundles
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcrun notarytool submit Demucs-vst3-aarch64-apple-darwin.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun notarytool submit Demucs-clap-aarch64-apple-darwin.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+      - name: Staple notarization tickets
+        run: |
+          xcrun stapler staple target/bundled/Demucs.vst3
+          xcrun stapler staple target/bundled/Demucs.clap
+
+      - name: Re-package signed bundles
+        run: |
+          rm Demucs-vst3-aarch64-apple-darwin.zip Demucs-clap-aarch64-apple-darwin.zip
           cd target/bundled
           zip -r ../../Demucs-vst3-aarch64-apple-darwin.zip Demucs.vst3
           zip -r ../../Demucs-clap-aarch64-apple-darwin.zip Demucs.clap
