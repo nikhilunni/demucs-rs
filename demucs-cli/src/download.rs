@@ -8,7 +8,11 @@ pub fn fetch(info: &ModelInfo) -> Result<Vec<u8>> {
     let url = demucs_core::model::metadata::download_url(info);
     eprintln!("Downloading {} ({} MB) ...", info.id, info.size_mb);
 
-    let response = ureq::get(&url)
+    let tls =
+        std::sync::Arc::new(ureq::native_tls::TlsConnector::new().context("Failed to init TLS")?);
+    let agent = ureq::AgentBuilder::new().tls_connector(tls).build();
+    let response = agent
+        .get(&url)
         .call()
         .with_context(|| format!("Failed to download model from {}", url))?;
 

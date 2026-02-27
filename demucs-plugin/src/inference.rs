@@ -479,7 +479,11 @@ fn model_options_for_variant(variant: ModelVariant, info: &ModelInfo) -> ModelOp
 /// Download model weights from HuggingFace.
 fn download_model(info: &ModelInfo, shared: &SharedState) -> Result<Vec<u8>, String> {
     let url = metadata::download_url(info);
-    let response = ureq::get(&url).call().map_err(|e| format!("{e}"))?;
+    let tls = std::sync::Arc::new(
+        ureq::native_tls::TlsConnector::new().map_err(|e| format!("TLS init: {e}"))?,
+    );
+    let agent = ureq::AgentBuilder::new().tls_connector(tls).build();
+    let response = agent.get(&url).call().map_err(|e| format!("{e}"))?;
 
     if response.status() != 200 {
         return Err(format!("HTTP {} from {url}", response.status()));
