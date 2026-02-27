@@ -31,6 +31,9 @@ pub struct DemucsPlugin {
     /// Free-running playback position for MIDI-gated output when DAW is stopped.
     /// Syncs to transport when playing; advances independently when stopped.
     midi_position: usize,
+    /// Whether we've attempted to restore from cache. Deferred to first process()
+    /// because VST3 deserializes params AFTER initialize().
+    cache_restore_attempted: bool,
 }
 
 impl Default for DemucsPlugin {
@@ -48,6 +51,7 @@ impl Default for DemucsPlugin {
             _inference_thread: Some(thread),
             notes_held: 0,
             midi_position: 0,
+            cache_restore_attempted: false,
         }
     }
 }
@@ -106,15 +110,13 @@ impl Plugin for DemucsPlugin {
             .daw_sample_rate
             .store(buffer_config.sample_rate as u32, Ordering::Relaxed);
 
-        // Try to restore stems from disk cache (DAW project reload)
-        self.try_restore_from_cache();
-
         true
     }
 
     fn reset(&mut self) {
         self.notes_held = 0;
         self.midi_position = 0;
+        // Don't reset cache_restore_attempted — only needs to run once per plugin lifetime.
     }
 
     fn process(
@@ -123,6 +125,16 @@ impl Plugin for DemucsPlugin {
         aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        // 0. Deferred cache restore — params aren't deserialized at initialize() time in VST3.
+        if !self.cache_restore_attempted {
+            self.cache_restore_attempted = true;
+            self.try_restore_from_cache();
+        }
+
+        // Keep persisted params in sync so DAW save captures current state.
+        // Must run before any early returns (e.g. the silence path).
+        self.sync_persisted_state();
+
         // 1. Drain MIDI events — update note counter.
         let was_held = self.notes_held;
         while let Some(event) = context.next_event() {
@@ -154,9 +166,14 @@ impl Plugin for DemucsPlugin {
             .daw_playing
             .store(transport.playing, Ordering::Relaxed);
 
-        // Auto-pause UI preview when DAW starts playing.
+        // When DAW is playing, drive the primary preview position from transport
+        // and auto-pause UI preview playback.
         if transport.playing {
             self.shared.preview_playing.store(false, Ordering::Relaxed);
+            let daw_pos = transport.pos_samples().unwrap_or(0);
+            self.shared
+                .preview_position
+                .store(daw_pos as u64, Ordering::Relaxed);
         }
 
         let preview_playing = self.shared.preview_playing.load(Ordering::Relaxed);
@@ -211,6 +228,43 @@ impl Plugin for DemucsPlugin {
 }
 
 impl DemucsPlugin {
+    /// Non-blocking sync of shared state → persisted params.
+    /// Called every process() block so the DAW always serializes current state.
+    fn sync_persisted_state(&self) {
+        // Cache key
+        if let Some(shared_key) = self.shared.cache_key.try_read() {
+            if let Some(mut persisted) = self.params.persisted_cache_key.try_write() {
+                if *persisted != *shared_key {
+                    *persisted = shared_key.clone();
+                }
+            }
+        }
+
+        // Source file path
+        if let Some(source_guard) = self.shared.source_audio.try_read() {
+            if let Some(mut persisted) = self.params.persisted_source_path.try_write() {
+                let current = source_guard
+                    .as_ref()
+                    .map(|s| s.file_path.to_string_lossy().to_string());
+                if *persisted != current {
+                    *persisted = current;
+                }
+            }
+        }
+
+        // Clip selection
+        if let Some(clip) = self.shared.clip.try_read() {
+            if clip.end_sample > 0 {
+                if let Some(mut persisted) = self.params.persisted_clip.try_write() {
+                    let json = serde_json::to_string(&*clip).ok();
+                    if *persisted != json {
+                        *persisted = json;
+                    }
+                }
+            }
+        }
+    }
+
     /// Try to restore stems from disk cache using the persisted cache key.
     fn try_restore_from_cache(&self) {
         let cache_key = self.params.persisted_cache_key.read().clone();
@@ -221,6 +275,56 @@ impl DemucsPlugin {
                 match stem_cache.load(&key) {
                     Ok(buffers) => {
                         inference::compute_stem_spectrograms(&self.shared, &buffers);
+
+                        // Restore content hash (needed for re-separation)
+                        if let Ok(Some(hash)) = stem_cache.load_content_hash(&key) {
+                            *self.shared.content_hash.write() = Some(hash);
+                        }
+
+                        // Restore source audio + main spectrogram
+                        match stem_cache.load_source(&key) {
+                            Ok(Some(source)) => {
+                                // Recompute main display spectrogram
+                                let mono: Vec<f32> = source
+                                    .left
+                                    .iter()
+                                    .zip(&source.right)
+                                    .map(|(l, r)| (l + r) * 0.5)
+                                    .collect();
+                                if let Ok(data) =
+                                    demucs_core::dsp::spectrogram::compute_spectrogram(&mono)
+                                {
+                                    *self.shared.spectrogram.write() =
+                                        Some(shared_state::DisplaySpectrogram {
+                                            mags: data.mags,
+                                            num_frames: data.num_frames,
+                                            num_bins: data.num_bins,
+                                            sample_rate: source.sample_rate,
+                                        });
+                                }
+                                // Restore clip selection from persisted params or default to full
+                                let clip = self
+                                    .params
+                                    .persisted_clip
+                                    .read()
+                                    .as_ref()
+                                    .and_then(|json| serde_json::from_str::<crate::clip::ClipSelection>(json).ok());
+                                *self.shared.clip.write() = clip.unwrap_or_else(|| {
+                                    crate::clip::ClipSelection::full(
+                                        source.left.len() as u64,
+                                        source.sample_rate,
+                                    )
+                                });
+                                *self.shared.source_audio.write() = Some(source);
+                            }
+                            Ok(None) => {
+                                log::info!("No cached source audio (old cache format)");
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to restore source audio: {e}");
+                            }
+                        }
+
                         self.shared.stem_buffers.store(Arc::new(Some(buffers)));
                         *self.shared.cache_key.write() = Some(key);
                         self.shared.set_progress(1.0);
@@ -253,17 +357,6 @@ impl Drop for DemucsPlugin {
         let _ = self.cmd_tx.send(InferenceCommand::Shutdown);
         if let Some(thread) = self._inference_thread.as_mut() {
             thread.join();
-        }
-
-        // Persist current state for DAW save
-        *self.params.persisted_cache_key.write() = self.shared.cache_key.read().clone();
-        if let Some(source) = self.shared.source_audio.read().as_ref() {
-            *self.params.persisted_source_path.write() =
-                Some(source.file_path.to_string_lossy().to_string());
-        }
-        let clip = *self.shared.clip.read();
-        if clip.end_sample > 0 {
-            *self.params.persisted_clip.write() = serde_json::to_string(&clip).ok();
         }
     }
 }

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use hound::{SampleFormat, WavSpec, WavWriter};
 
 use crate::clip::ClipSelection;
-use crate::shared_state::{StemBuffers, StemChannel};
+use crate::shared_state::{SourceAudio, StemBuffers, StemChannel, WaveformPeaks};
 
 /// Disk-based stem cache using blake3 fingerprinting.
 ///
@@ -31,6 +31,21 @@ pub struct CacheMetadata {
     pub clip_end: u64,
     pub sample_rate: u32,
     pub n_samples: usize,
+    /// Source audio filename (for display).
+    #[serde(default)]
+    pub source_filename: Option<String>,
+    /// Source audio file path (for re-reference).
+    #[serde(default)]
+    pub source_file_path: Option<String>,
+    /// Number of samples in the full source audio (per channel).
+    #[serde(default)]
+    pub source_n_samples: Option<usize>,
+    /// Source audio sample rate.
+    #[serde(default)]
+    pub source_sample_rate: Option<u32>,
+    /// Blake3 hash of the original source file (for re-separation with different models).
+    #[serde(default)]
+    pub content_hash: Option<Vec<u8>>,
 }
 
 impl StemCache {
@@ -109,6 +124,71 @@ impl StemCache {
         Ok(paths)
     }
 
+    /// Save source audio alongside cached stems.
+    pub fn save_source(&self, key: &str, source: &SourceAudio) -> io::Result<()> {
+        let dir = self.stems_dir.join(key);
+        fs::create_dir_all(&dir)?;
+        write_raw_f32(&dir.join("source_left.raw"), &source.left)?;
+        write_raw_f32(&dir.join("source_right.raw"), &source.right)?;
+        Ok(())
+    }
+
+    /// Load the content hash from cached metadata.
+    pub fn load_content_hash(&self, key: &str) -> io::Result<Option<[u8; 32]>> {
+        let dir = self.stems_dir.join(key);
+        let meta_bytes = fs::read(dir.join("metadata.json"))?;
+        let meta: CacheMetadata = serde_json::from_slice(&meta_bytes)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        Ok(meta.content_hash.and_then(|v| {
+            if v.len() == 32 {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&v);
+                Some(arr)
+            } else {
+                None
+            }
+        }))
+    }
+
+    /// Load cached source audio from disk.
+    pub fn load_source(&self, key: &str) -> io::Result<Option<SourceAudio>> {
+        let dir = self.stems_dir.join(key);
+        let meta_bytes = fs::read(dir.join("metadata.json"))?;
+        let meta: CacheMetadata = serde_json::from_slice(&meta_bytes)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        let (filename, file_path, n_samples, sample_rate) = match (
+            &meta.source_filename,
+            &meta.source_file_path,
+            meta.source_n_samples,
+            meta.source_sample_rate,
+        ) {
+            (Some(name), Some(path), Some(n), Some(sr)) => {
+                (name.clone(), PathBuf::from(path), n, sr)
+            }
+            _ => return Ok(None),
+        };
+
+        let left_path = dir.join("source_left.raw");
+        let right_path = dir.join("source_right.raw");
+        if !left_path.exists() || !right_path.exists() {
+            return Ok(None);
+        }
+
+        let left = read_raw_f32(&left_path, n_samples)?;
+        let right = read_raw_f32(&right_path, n_samples)?;
+        let peaks = WaveformPeaks::from_audio(&left, &right, 2000);
+
+        Ok(Some(SourceAudio {
+            left,
+            right,
+            sample_rate,
+            filename,
+            file_path,
+            peaks,
+        }))
+    }
+
     /// Save stems to disk cache.
     pub fn save(
         &self,
@@ -116,6 +196,8 @@ impl StemCache {
         buffers: &StemBuffers,
         model_id: &str,
         clip: &ClipSelection,
+        source: Option<&SourceAudio>,
+        content_hash: Option<&[u8; 32]>,
     ) -> io::Result<()> {
         let dir = self.stems_dir.join(key);
         fs::create_dir_all(&dir)?;
@@ -127,6 +209,11 @@ impl StemCache {
             clip_end: clip.end_sample,
             sample_rate: buffers.sample_rate,
             n_samples: buffers.n_samples,
+            source_filename: source.map(|s| s.filename.clone()),
+            source_file_path: source.map(|s| s.file_path.to_string_lossy().to_string()),
+            source_n_samples: source.map(|s| s.left.len()),
+            source_sample_rate: source.map(|s| s.sample_rate),
+            content_hash: content_hash.map(|h| h.to_vec()),
         };
         let meta_json = serde_json::to_string_pretty(&meta)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;

@@ -373,9 +373,25 @@ fn handle_separate(
 
             // Save to disk cache + write WAV files for drag-and-drop
             if let Ok(stem_cache) = StemCache::new() {
-                if let Err(e) = stem_cache.save(&cache_key, &buffers, model_id, &clip) {
+                let source_ref = shared.source_audio.read();
+                let hash_ref = shared.content_hash.read();
+                if let Err(e) = stem_cache.save(
+                    &cache_key,
+                    &buffers,
+                    model_id,
+                    &clip,
+                    source_ref.as_ref(),
+                    hash_ref.as_ref(),
+                ) {
                     log::warn!("Failed to cache stems: {e}");
                 }
+                // Cache source audio for project restore
+                if let Some(source) = source_ref.as_ref() {
+                    if let Err(e) = stem_cache.save_source(&cache_key, source) {
+                        log::warn!("Failed to cache source audio: {e}");
+                    }
+                }
+                drop(source_ref);
                 match stem_cache.save_wavs(&cache_key, &buffers) {
                     Ok(paths) => {
                         *shared.stem_wav_paths.write() = paths
