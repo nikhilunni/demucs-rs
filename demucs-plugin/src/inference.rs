@@ -93,17 +93,15 @@ fn inference_loop(shared: Arc<SharedState>, cmd_rx: Receiver<InferenceCommand>) 
     // Cached model (kept alive across separations of the same variant)
     let mut cached_model: Option<(ModelVariant, Demucs<B>)> = None;
 
-    loop {
-        let cmd = match cmd_rx.recv() {
-            Ok(cmd) => cmd,
-            Err(_) => break, // Sender dropped → shutdown
-        };
-
+    while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
             InferenceCommand::LoadAudio { path } => {
                 handle_load_audio(&shared, &path);
             }
-            InferenceCommand::Separate { model_variant, clip } => {
+            InferenceCommand::Separate {
+                model_variant,
+                clip,
+            } => {
                 handle_separate(&shared, model_variant, clip, &mut cached_model);
             }
             InferenceCommand::Cancel => {
@@ -143,7 +141,11 @@ fn handle_load_audio(shared: &Arc<SharedState>, path: &std::path::Path) {
     let peaks = WaveformPeaks::from_audio(&left, &right, 2000);
 
     // Compute display spectrogram (mono mix → STFT → dB magnitudes)
-    let mono: Vec<f32> = left.iter().zip(&right).map(|(l, r)| (l + r) * 0.5).collect();
+    let mono: Vec<f32> = left
+        .iter()
+        .zip(&right)
+        .map(|(l, r)| (l + r) * 0.5)
+        .collect();
     let spectrogram = match demucs_core::dsp::spectrogram::compute_spectrogram(&mono) {
         Ok(data) => Some(DisplaySpectrogram {
             mags: data.mags,
@@ -279,10 +281,7 @@ fn handle_separate(
     init_gpu();
 
     // Load or reuse model
-    let needs_new_model = match cached_model {
-        Some((variant, _)) if *variant == model_variant => false,
-        _ => true,
-    };
+    let needs_new_model = !matches!(cached_model, Some((variant, _)) if *variant == model_variant);
 
     if needs_new_model {
         let opts = model_options_for_variant(model_variant, info);
@@ -624,10 +623,7 @@ fn read_audio(path: &std::path::Path) -> Result<(Vec<f32>, Vec<f32>, u32), Strin
     }
 
     if left.is_empty() {
-        return Err(format!(
-            "No audio samples decoded from: {}",
-            path.display()
-        ));
+        return Err(format!("No audio samples decoded from: {}", path.display()));
     }
 
     Ok((left, right, sample_rate))

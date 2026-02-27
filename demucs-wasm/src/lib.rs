@@ -118,8 +118,8 @@ impl SpectrogramResult {
 /// Uses `n_fft = 4096` and `hop_length = 1024` to match HTDemucs.
 #[wasm_bindgen]
 pub fn compute_spectrogram(samples: &[f32]) -> Result<SpectrogramResult, JsError> {
-    let data = spectrogram::compute_spectrogram(samples)
-        .map_err(|e| JsError::new(&format!("{}", e)))?;
+    let data =
+        spectrogram::compute_spectrogram(samples).map_err(|e| JsError::new(&format!("{}", e)))?;
 
     Ok(SpectrogramResult {
         mags: data.mags,

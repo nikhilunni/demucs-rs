@@ -7,9 +7,10 @@
 /// Any ──[error]──► Error ──[dismiss]──► Idle
 /// Processing ──[cancel]──► Idle
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum PluginPhase {
     /// No audio loaded. Waiting for user action.
+    #[default]
     Idle,
 
     /// Audio file loaded but separation not yet started.
@@ -26,10 +27,4 @@ pub enum PluginPhase {
 
     /// An error occurred.
     Error { message: String },
-}
-
-impl Default for PluginPhase {
-    fn default() -> Self {
-        PluginPhase::Idle
-    }
 }

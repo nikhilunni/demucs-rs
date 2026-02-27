@@ -1,6 +1,5 @@
 #[cfg(target_os = "macos")]
 mod swiftui_editor;
-pub mod protocol;
 
 use std::sync::Arc;
 

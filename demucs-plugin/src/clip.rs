@@ -18,26 +18,6 @@ impl ClipSelection {
             sample_rate,
         }
     }
-
-    /// Number of samples in the selection.
-    pub fn n_samples(&self) -> usize {
-        (self.end_sample - self.start_sample) as usize
-    }
-
-    /// Duration in seconds.
-    pub fn duration_seconds(&self) -> f64 {
-        self.n_samples() as f64 / self.sample_rate as f64
-    }
-
-    /// Start time in seconds.
-    pub fn start_seconds(&self) -> f64 {
-        self.start_sample as f64 / self.sample_rate as f64
-    }
-
-    /// End time in seconds.
-    pub fn end_seconds(&self) -> f64 {
-        self.end_sample as f64 / self.sample_rate as f64
-    }
 }
 
 impl Default for ClipSelection {

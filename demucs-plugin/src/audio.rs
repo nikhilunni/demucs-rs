@@ -37,12 +37,21 @@ pub fn serve_stems(
     // Pre-compute per-stem gains for the main (mix) output.
     let mut main_gain = [0.0f32; MAX_STEMS];
     let any_solo = (0..n_stems).any(|i| params.stem(i).solo.value());
-    for i in 0..n_stems {
+    for (i, gain_slot) in main_gain.iter_mut().enumerate().take(n_stems) {
         let sp = params.stem(i);
         let soloed = sp.solo.value();
         let gain = sp.gain.value();
         // If any stem is soloed, only soloed stems pass through.
-        main_gain[i] = gain * if any_solo { if soloed { 1.0 } else { 0.0 } } else { 1.0 };
+        *gain_slot = gain
+            * if any_solo {
+                if soloed {
+                    1.0
+                } else {
+                    0.0
+                }
+            } else {
+                1.0
+            };
     }
 
     // Main output: weighted sum of all stems.
@@ -50,9 +59,9 @@ pub fn serve_stems(
         let pos = playback_pos + frame_idx;
         let (mut l, mut r) = (0.0f32, 0.0f32);
         if pos < n_samples {
-            for i in 0..n_stems {
-                l += stems.stems[i].left[pos] * main_gain[i];
-                r += stems.stems[i].right[pos] * main_gain[i];
+            for (i, &g) in main_gain.iter().enumerate().take(n_stems) {
+                l += stems.stems[i].left[pos] * g;
+                r += stems.stems[i].right[pos] * g;
             }
         }
         if let Some(out) = frame.get_mut(0) {

@@ -23,7 +23,12 @@ pub fn read_audio(path: &Path) -> Result<(Vec<f32>, Vec<f32>, u32)> {
     }
 
     let probed = symphonia::default::get_probe()
-        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
         .with_context(|| format!("Unsupported audio format: {}", path.display()))?;
 
     let mut format = probed.format;

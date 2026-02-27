@@ -135,14 +135,15 @@ struct CallbackContext {
 unsafe extern "C" fn cb_file_drop(ctx: *mut c_void, path: *const c_char) {
     let context = &*(ctx as *const CallbackContext);
     // Stop preview on new file
-    context.shared.preview_playing.store(false, Ordering::Relaxed);
+    context
+        .shared
+        .preview_playing
+        .store(false, Ordering::Relaxed);
     context.shared.preview_position.store(0, Ordering::Relaxed);
     let path_str = CStr::from_ptr(path).to_string_lossy().to_string();
-    let _ = context
-        .cmd_tx
-        .send(InferenceCommand::LoadAudio {
-            path: std::path::PathBuf::from(path_str),
-        });
+    let _ = context.cmd_tx.send(InferenceCommand::LoadAudio {
+        path: std::path::PathBuf::from(path_str),
+    });
 }
 
 unsafe extern "C" fn cb_separate(
@@ -152,7 +153,10 @@ unsafe extern "C" fn cb_separate(
 ) {
     let context = &*(ctx as *const CallbackContext);
     // Stop preview on new separation
-    context.shared.preview_playing.store(false, Ordering::Relaxed);
+    context
+        .shared
+        .preview_playing
+        .store(false, Ordering::Relaxed);
     context.shared.preview_position.store(0, Ordering::Relaxed);
     let model_variant = match variant {
         DemucsModelVariantFFI::Standard => ModelVariant::Standard,
@@ -164,12 +168,10 @@ unsafe extern "C" fn cb_separate(
         end_sample: clip.end_sample,
         sample_rate: clip.sample_rate,
     };
-    let _ = context
-        .cmd_tx
-        .send(InferenceCommand::Separate {
-            model_variant,
-            clip: clip_sel,
-        });
+    let _ = context.cmd_tx.send(InferenceCommand::Separate {
+        model_variant,
+        clip: clip_sel,
+    });
 }
 
 unsafe extern "C" fn cb_cancel(ctx: *mut c_void) {
@@ -197,7 +199,9 @@ unsafe extern "C" fn cb_stem_gain(ctx: *mut c_void, stem_idx: u32, gain: f32) {
     let ptr = param.as_ptr();
     let normalized = param.preview_normalized(gain);
     context.gui_context.raw_begin_set_parameter(ptr);
-    context.gui_context.raw_set_parameter_normalized(ptr, normalized);
+    context
+        .gui_context
+        .raw_set_parameter_normalized(ptr, normalized);
     context.gui_context.raw_end_set_parameter(ptr);
 }
 
@@ -206,7 +210,10 @@ unsafe extern "C" fn cb_preview_toggle(ctx: *mut c_void) {
     let is_playing = context.shared.preview_playing.load(Ordering::Relaxed);
     if is_playing {
         // Pause
-        context.shared.preview_playing.store(false, Ordering::Relaxed);
+        context
+            .shared
+            .preview_playing
+            .store(false, Ordering::Relaxed);
     } else {
         // If at end of track, reset to beginning before playing
         let guard = context.shared.stem_buffers.load();
@@ -216,7 +223,10 @@ unsafe extern "C" fn cb_preview_toggle(ctx: *mut c_void) {
                 context.shared.preview_position.store(0, Ordering::Relaxed);
             }
         }
-        context.shared.preview_playing.store(true, Ordering::Relaxed);
+        context
+            .shared
+            .preview_playing
+            .store(true, Ordering::Relaxed);
     }
 }
 
@@ -234,7 +244,9 @@ unsafe extern "C" fn cb_stem_solo(ctx: *mut c_void, stem_idx: u32, soloed: u32) 
     let ptr = param.as_ptr();
     let normalized = if soloed != 0 { 1.0 } else { 0.0 };
     context.gui_context.raw_begin_set_parameter(ptr);
-    context.gui_context.raw_set_parameter_normalized(ptr, normalized);
+    context
+        .gui_context
+        .raw_set_parameter_normalized(ptr, normalized);
     context.gui_context.raw_end_set_parameter(ptr);
 }
 
@@ -328,8 +340,7 @@ impl Editor for SwiftUIEditor {
         };
 
         // Create the Swift UI (must be called on main thread — nih-plug guarantees this)
-        let ui_handle =
-            unsafe { demucs_ui_create(ns_view, callbacks, self.width, self.height) };
+        let ui_handle = unsafe { demucs_ui_create(ns_view, callbacks, self.width, self.height) };
 
         // Push initial state immediately so the UI doesn't flash Idle.
         {
@@ -435,12 +446,16 @@ fn build_ui_state(
             strings.push(cs);
             (DemucsPhaseTag::AudioLoaded, ptr, std::ptr::null())
         }
-        PluginPhase::Downloading { .. } => {
-            (DemucsPhaseTag::Downloading, std::ptr::null(), std::ptr::null())
-        }
-        PluginPhase::Processing { .. } => {
-            (DemucsPhaseTag::Processing, std::ptr::null(), std::ptr::null())
-        }
+        PluginPhase::Downloading { .. } => (
+            DemucsPhaseTag::Downloading,
+            std::ptr::null(),
+            std::ptr::null(),
+        ),
+        PluginPhase::Processing { .. } => (
+            DemucsPhaseTag::Processing,
+            std::ptr::null(),
+            std::ptr::null(),
+        ),
         PluginPhase::Ready => (DemucsPhaseTag::Ready, std::ptr::null(), std::ptr::null()),
         PluginPhase::Error { message } => {
             let cs = CString::new(message.as_str()).unwrap_or_default();

@@ -72,12 +72,12 @@ impl Plugin for DemucsPlugin {
         main_output_channels: NonZeroU32::new(NUM_CHANNELS),
         aux_input_ports: &[],
         aux_output_ports: &[
-            unsafe { NonZeroU32::new_unchecked(NUM_CHANNELS) },
-            unsafe { NonZeroU32::new_unchecked(NUM_CHANNELS) },
-            unsafe { NonZeroU32::new_unchecked(NUM_CHANNELS) },
-            unsafe { NonZeroU32::new_unchecked(NUM_CHANNELS) },
-            unsafe { NonZeroU32::new_unchecked(NUM_CHANNELS) },
-            unsafe { NonZeroU32::new_unchecked(NUM_CHANNELS) },
+            NonZeroU32::new(NUM_CHANNELS).unwrap(),
+            NonZeroU32::new(NUM_CHANNELS).unwrap(),
+            NonZeroU32::new(NUM_CHANNELS).unwrap(),
+            NonZeroU32::new(NUM_CHANNELS).unwrap(),
+            NonZeroU32::new(NUM_CHANNELS).unwrap(),
+            NonZeroU32::new(NUM_CHANNELS).unwrap(),
         ],
         names: PortNames {
             layout: Some("6-stem separation"),
@@ -96,7 +96,11 @@ impl Plugin for DemucsPlugin {
     }
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-        editor::create(self.params.clone(), self.shared.clone(), self.cmd_tx.clone())
+        editor::create(
+            self.params.clone(),
+            self.shared.clone(),
+            self.cmd_tx.clone(),
+        )
     }
 
     fn initialize(
@@ -149,8 +153,7 @@ impl Plugin for DemucsPlugin {
 
         // When first MIDI note pressed, start playback from preview position.
         if was_held == 0 && self.notes_held > 0 {
-            self.midi_position =
-                self.shared.preview_position.load(Ordering::Relaxed) as usize;
+            self.midi_position = self.shared.preview_position.load(Ordering::Relaxed) as usize;
         }
 
         // Update MIDI active state for GUI playhead.
@@ -223,7 +226,13 @@ impl Plugin for DemucsPlugin {
         }
 
         // 3. Serve stems at the computed position.
-        audio::serve_stems(buffer, aux, &self.shared.stem_buffers, &self.params, playback_pos)
+        audio::serve_stems(
+            buffer,
+            aux,
+            &self.shared.stem_buffers,
+            &self.params,
+            playback_pos,
+        )
     }
 }
 
@@ -303,12 +312,11 @@ impl DemucsPlugin {
                                         });
                                 }
                                 // Restore clip selection from persisted params or default to full
-                                let clip = self
-                                    .params
-                                    .persisted_clip
-                                    .read()
-                                    .as_ref()
-                                    .and_then(|json| serde_json::from_str::<crate::clip::ClipSelection>(json).ok());
+                                let clip =
+                                    self.params.persisted_clip.read().as_ref().and_then(|json| {
+                                        serde_json::from_str::<crate::clip::ClipSelection>(json)
+                                            .ok()
+                                    });
                                 *self.shared.clip.write() = clip.unwrap_or_else(|| {
                                     crate::clip::ClipSelection::full(
                                         source.left.len() as u64,
@@ -363,8 +371,7 @@ impl Drop for DemucsPlugin {
 
 impl ClapPlugin for DemucsPlugin {
     const CLAP_ID: &'static str = "rs.demucs.plugin";
-    const CLAP_DESCRIPTION: Option<&'static str> =
-        Some("AI-powered music source separation");
+    const CLAP_DESCRIPTION: Option<&'static str> = Some("AI-powered music source separation");
     const CLAP_MANUAL_URL: Option<&'static str> = None;
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
     const CLAP_FEATURES: &'static [ClapFeature] = &[

@@ -18,9 +18,12 @@ fn build_swift_ui() {
     let status = Command::new("swift")
         .args([
             "build",
-            "-c", "release",
-            "--package-path", &package_path,
-            "--build-path", &swift_build_dir,
+            "-c",
+            "release",
+            "--package-path",
+            &package_path,
+            "--build-path",
+            &swift_build_dir,
         ])
         .status()
         .expect("Failed to run swift build. Is Xcode installed?");

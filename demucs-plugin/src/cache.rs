@@ -104,20 +104,13 @@ impl StemCache {
             let path = dir.join(format!("{name}.wav"));
             let file = fs::File::create(&path)?;
             let buf_writer = io::BufWriter::with_capacity(256 * 1024, file);
-            let mut writer = WavWriter::new(buf_writer, spec)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            let mut writer = WavWriter::new(buf_writer, spec).map_err(io::Error::other)?;
             let stem = &buffers.stems[i];
             for (l, r) in stem.left.iter().zip(&stem.right) {
-                writer
-                    .write_sample(*l)
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-                writer
-                    .write_sample(*r)
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                writer.write_sample(*l).map_err(io::Error::other)?;
+                writer.write_sample(*r).map_err(io::Error::other)?;
             }
-            writer
-                .finalize()
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            writer.finalize().map_err(io::Error::other)?;
             paths.push(path);
         }
 
@@ -215,12 +208,14 @@ impl StemCache {
             source_sample_rate: source.map(|s| s.sample_rate),
             content_hash: content_hash.map(|h| h.to_vec()),
         };
-        let meta_json = serde_json::to_string_pretty(&meta)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let meta_json = serde_json::to_string_pretty(&meta).map_err(io::Error::other)?;
         fs::write(dir.join("metadata.json"), meta_json)?;
 
         for (i, name) in buffers.stem_names.iter().enumerate() {
-            write_raw_f32(&dir.join(format!("{name}_left.raw")), &buffers.stems[i].left)?;
+            write_raw_f32(
+                &dir.join(format!("{name}_left.raw")),
+                &buffers.stems[i].left,
+            )?;
             write_raw_f32(
                 &dir.join(format!("{name}_right.raw")),
                 &buffers.stems[i].right,
@@ -234,11 +229,7 @@ impl StemCache {
 /// Compute the cache key from content hash, clip selection, and model ID.
 ///
 /// Returns a 32-character hex string (128 bits of blake3 output).
-pub fn compute_cache_key(
-    content_hash: &[u8; 32],
-    clip: &ClipSelection,
-    model_id: &str,
-) -> String {
+pub fn compute_cache_key(content_hash: &[u8; 32], clip: &ClipSelection, model_id: &str) -> String {
     let mut hasher = blake3::Hasher::new();
     hasher.update(content_hash);
     hasher.update(&clip.start_sample.to_le_bytes());
