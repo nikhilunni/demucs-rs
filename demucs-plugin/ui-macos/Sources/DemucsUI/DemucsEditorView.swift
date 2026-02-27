@@ -45,39 +45,12 @@ struct PlayerLayout: View {
             // Main player area
             VStack(alignment: .leading, spacing: 0) {
                 // Spectrogram (260px matching web) with playhead overlay
-                ZStack(alignment: .leading) {
+                ZStack {
                     SpectrogramImageView(image: viewState.spectrogramImage)
-
-                    // Playhead line (visible when stems exist)
-                    if viewState.phase == .ready && viewState.stemNSamples > 0 {
-                        GeometryReader { geo in
-                            let xPos = geo.size.width * viewState.previewFraction
-                            Rectangle()
-                                .fill(Color.white)
-                                .frame(width: 1.5)
-                                .offset(x: xPos - 0.75)
-                                .allowsHitTesting(false)
-                        }
-                    }
+                    PlayheadOverlay()
+                    SpectrogramSeekGesture()
                 }
                 .frame(height: 260)
-                .overlay(
-                    // Invisible geometry reader for click-to-seek
-                    GeometryReader { geo in
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .gesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onEnded { value in
-                                        if viewState.phase == .ready && viewState.stemNSamples > 0 {
-                                            let fraction = max(0, min(1, value.location.x / geo.size.width))
-                                            let sample = UInt64(fraction * Double(viewState.stemNSamples))
-                                            callbackHandler.previewSeek(samplePosition: sample)
-                                        }
-                                    }
-                            )
-                    }
-                )
                 .padding(.horizontal, Theme.padding)
                 .padding(.top, 14)
 
@@ -124,14 +97,10 @@ struct PlayerLayout: View {
 /// Player controls row: filename + duration (non-ready), or play/seek/time (ready).
 struct PlayerControlsRow: View {
     @EnvironmentObject var viewState: ViewState
-    @EnvironmentObject var callbackHandler: CallbackHandler
-
-    @State private var localSeekFraction: Double = 0
-    @State private var isSeeking: Bool = false
 
     var body: some View {
-        if viewState.phase == .ready && viewState.stemNSamples > 0 {
-            readyControls
+        if viewState.phase == .ready {
+            PlayerReadyControls()
         } else {
             defaultControls
         }
@@ -158,9 +127,19 @@ struct PlayerControlsRow: View {
             }
         }
     }
+}
 
-    // Ready: [filename] [▶/⏸] [0:42] [====seek====] [3:57]
-    private var readyControls: some View {
+/// Ready-phase player controls — observes PreviewState for seek/time so
+/// fast-changing position doesn't re-render the rest of the UI.
+struct PlayerReadyControls: View {
+    @EnvironmentObject var viewState: ViewState
+    @EnvironmentObject var previewState: PreviewState
+    @EnvironmentObject var callbackHandler: CallbackHandler
+
+    @State private var localSeekFraction: Double = 0
+    @State private var isSeeking: Bool = false
+
+    var body: some View {
         HStack(spacing: 10) {
             // Filename (compact)
             if !viewState.filename.isEmpty {
@@ -172,11 +151,11 @@ struct PlayerControlsRow: View {
                     .frame(maxWidth: 120, alignment: .leading)
             }
 
-            // Play/Pause button
+            // Play/Pause button (disabled when DAW transport is playing)
             Button(action: { callbackHandler.previewToggle() }) {
-                Image(systemName: viewState.previewPlaying ? "pause.fill" : "play.fill")
+                Image(systemName: previewState.previewPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 12))
-                    .foregroundColor(Theme.text)
+                    .foregroundColor(previewState.dawPlaying ? Theme.textMicro : Theme.text)
                     .frame(width: 28, height: 28)
                     .background(
                         RoundedRectangle(cornerRadius: 6)
@@ -188,9 +167,10 @@ struct PlayerControlsRow: View {
                     )
             }
             .buttonStyle(.plain)
+            .disabled(previewState.dawPlaying)
 
             // Current time
-            Text(formatTime(viewState.previewTimeSeconds))
+            Text(formatTime(previewState.previewTimeSeconds))
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundColor(Theme.textDim)
                 .frame(width: 36, alignment: .trailing)
@@ -212,15 +192,15 @@ struct PlayerControlsRow: View {
                     seekTo(fraction: localSeekFraction)
                 }
             }
-            .onChange(of: viewState.previewFraction) { newValue in
+            .onChange(of: previewState.previewFraction) { newValue in
                 if !isSeeking {
                     localSeekFraction = newValue
                 }
             }
-            .onAppear { localSeekFraction = viewState.previewFraction }
+            .onAppear { localSeekFraction = previewState.previewFraction }
 
             // Total duration
-            Text(formatTime(viewState.stemDurationSeconds))
+            Text(formatTime(previewState.stemDurationSeconds))
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundColor(Theme.textMicro)
                 .frame(width: 36, alignment: .leading)
@@ -228,7 +208,7 @@ struct PlayerControlsRow: View {
     }
 
     private func seekTo(fraction: Double) {
-        let sample = UInt64(fraction * Double(viewState.stemNSamples))
+        let sample = UInt64(fraction * Double(previewState.stemNSamples))
         callbackHandler.previewSeek(samplePosition: sample)
     }
 }
@@ -581,6 +561,73 @@ struct ModelCard: View {
             withAnimation(Theme.quickAnimation) { isHovered = h }
         }
         .animation(Theme.quickAnimation, value: isSelected)
+    }
+}
+
+// ── Playhead Overlay ─────────────────────────────────────────────────────────
+
+/// Playhead overlay showing preview position (white) and MIDI position (accent).
+/// Extracted into its own view so only this re-renders at 30fps.
+struct PlayheadOverlay: View {
+    @EnvironmentObject var viewState: ViewState
+    @EnvironmentObject var previewState: PreviewState
+
+    var body: some View {
+        GeometryReader { geo in
+            if viewState.phase == .ready && previewState.stemNSamples > 0 {
+                let previewX = geo.size.width * previewState.previewFraction
+
+                // MIDI region + playhead (when key held)
+                if previewState.midiActive {
+                    let midiX = geo.size.width * previewState.midiFraction
+                    let minX = min(previewX, midiX)
+                    let maxX = max(previewX, midiX)
+
+                    // Light fill between the two positions
+                    Rectangle()
+                        .fill(Theme.accentCool.opacity(0.25))
+                        .frame(width: max(maxX - minX, 0), height: geo.size.height)
+                        .offset(x: minX)
+
+                    // MIDI playhead line
+                    Rectangle()
+                        .fill(Theme.accentCool.opacity(0.7))
+                        .frame(width: 1.5, height: geo.size.height)
+                        .offset(x: midiX - 0.75)
+                }
+
+                // Preview playhead line (always on top)
+                Rectangle()
+                    .fill(Color.white)
+                    .frame(width: 1.5, height: geo.size.height)
+                    .offset(x: previewX - 0.75)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// Drag-to-seek gesture on the spectrogram (also handles single clicks).
+struct SpectrogramSeekGesture: View {
+    @EnvironmentObject var viewState: ViewState
+    @EnvironmentObject var previewState: PreviewState
+    @EnvironmentObject var callbackHandler: CallbackHandler
+
+    var body: some View {
+        GeometryReader { geo in
+            Color.clear
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            if viewState.phase == .ready && previewState.stemNSamples > 0 {
+                                let fraction = max(0, min(1, value.location.x / geo.size.width))
+                                let sample = UInt64(fraction * Double(previewState.stemNSamples))
+                                callbackHandler.previewSeek(samplePosition: sample)
+                            }
+                        }
+                )
+        }
     }
 }
 

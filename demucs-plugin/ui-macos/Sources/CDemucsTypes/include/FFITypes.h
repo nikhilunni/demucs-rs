@@ -78,6 +78,9 @@ typedef struct {
     uint64_t preview_position;   // current sample position
     uint64_t stem_n_samples;     // total stem length in samples
     uint32_t stem_sample_rate;   // stem sample rate
+    uint32_t midi_active;        // 0 or 1 — any MIDI notes held
+    uint64_t midi_position;      // current MIDI playback sample position
+    uint32_t daw_playing;        // 0 or 1 — DAW transport is playing
 } DemucsUIState;
 
 // ── Callbacks (Swift -> Rust) ───────────────────────────────────────

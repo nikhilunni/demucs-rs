@@ -41,6 +41,11 @@ enum ModelVariantUI: UInt32 {
 
 /// Observable state for the SwiftUI views.
 /// Updated from Rust via FFI at ~30fps.
+///
+/// PERF: Every `@Published` setter fires `objectWillChange`, causing all
+/// observing views to re-evaluate. We guard each setter with an equality
+/// check so objectWillChange only fires when data actually changes.
+/// Stem spectrogram images are cached — only re-rendered when stem count changes.
 final class ViewState: ObservableObject {
     @Published var phase: Phase = .idle
     @Published var filename: String = ""
@@ -55,12 +60,6 @@ final class ViewState: ObservableObject {
     @Published var stems: [StemInfo] = []
     @Published var modelVariant: ModelVariantUI = .standard
 
-    // Preview playback state
-    @Published var previewPlaying: Bool = false
-    @Published var previewPosition: UInt64 = 0
-    @Published var stemNSamples: UInt64 = 0
-    @Published var stemSampleRate: UInt32 = 0
-
     /// Display spectrogram: dB magnitudes, flat [frame × bin] layout.
     @Published var spectrogramMags: [Float] = []
     @Published var spectrogramFrames: UInt32 = 0
@@ -68,6 +67,11 @@ final class ViewState: ObservableObject {
     @Published var spectrogramSampleRate: UInt32 = 0
     /// Pre-rendered CGImage of the magma spectrogram (cached, rebuilt on data change).
     @Published var spectrogramImage: CGImage? = nil
+
+    /// Cached stem spectrogram images. Only rebuilt when stem count changes.
+    /// Read from polling thread, written on main — safe because worst case is
+    /// one extra rebuild from a stale count read.
+    private var _stemImageCache: [CGImage?] = []
 
     /// Update from a C state snapshot. Called from background thread;
     /// copies all C data immediately, then dispatches to main thread.
@@ -77,52 +81,56 @@ final class ViewState: ObservableObject {
         let stageLabel = state.stage_label != nil ? String(cString: state.stage_label) : ""
         let errorMessage = state.error_message != nil ? String(cString: state.error_message) : ""
 
-        // Copy peaks array
+        // Copy peaks array — only when count changes (peaks are static after load)
+        let peaksChanged = Int(state.num_peaks) != self.peaks.count
         var peaks: [Peak] = []
-        if state.num_peaks > 0, state.peaks != nil {
+        if peaksChanged, state.num_peaks > 0, state.peaks != nil {
             let buffer = UnsafeBufferPointer(start: state.peaks, count: Int(state.num_peaks))
             peaks = buffer.map { Peak(minVal: $0.min_val, maxVal: $0.max_val) }
         }
 
-        // Copy stems array (including per-stem spectrograms)
+        // Copy stems array — only re-render spectrogram images when stem count changes.
+        let rebuildStemImages = Int(state.num_stems) != _stemImageCache.count
         var stems: [StemInfo] = []
         if state.num_stems > 0, state.stems != nil {
             let buffer = UnsafeBufferPointer(start: state.stems, count: Int(state.num_stems))
-            stems = buffer.map { stem in
+            stems = buffer.enumerated().map { (i, stem) in
                 let name = stem.name != nil ? String(cString: stem.name) : "unknown"
                 let color = Color(red: Double(stem.r), green: Double(stem.g), blue: Double(stem.b))
-                // Extract per-stem spectrogram if available
-                var stemImage: CGImage? = nil
-                let ss = stem.spectrogram
-                if ss.num_frames > 0, ss.num_bins > 0, ss.mags != nil {
-                    let count = Int(ss.num_frames) * Int(ss.num_bins)
-                    let mags = Array(UnsafeBufferPointer(start: ss.mags, count: count))
 
-                    // Compute dB range for this stem
-                    var dbMin: Float = .infinity
-                    var dbMax: Float = -.infinity
-                    for v in mags {
-                        if v < dbMin { dbMin = v }
-                        if v > dbMax { dbMax = v }
+                let stemImage: CGImage?
+                if rebuildStemImages {
+                    // First time or stem count changed — render from STFT
+                    let ss = stem.spectrogram
+                    if ss.num_frames > 0, ss.num_bins > 0, ss.mags != nil {
+                        let count = Int(ss.num_frames) * Int(ss.num_bins)
+                        let mags = Array(UnsafeBufferPointer(start: ss.mags, count: count))
+                        var dbMin: Float = .infinity
+                        var dbMax: Float = -.infinity
+                        for v in mags {
+                            if v < dbMin { dbMin = v }
+                            if v > dbMax { dbMax = v }
+                        }
+                        let dbMinClamped = max(dbMin, dbMax - 80)
+                        let dbRange = max(dbMax - dbMinClamped, 1)
+                        stemImage = renderStemLayerFromSTFT(
+                            mags: mags,
+                            numFrames: Int(ss.num_frames),
+                            numBins: Int(ss.num_bins),
+                            sampleRate: Int(ss.sample_rate),
+                            dbMin: dbMinClamped, dbRange: dbRange,
+                            stemR: UInt8(min(max(stem.r * 255, 0), 255)),
+                            stemG: UInt8(min(max(stem.g * 255, 0), 255)),
+                            stemB: UInt8(min(max(stem.b * 255, 0), 255))
+                        )
+                    } else {
+                        stemImage = nil
                     }
-                    let dbMinClamped = max(dbMin, dbMax - 80)
-                    let dbRange = max(dbMax - dbMinClamped, 1)
-
-                    // Stem color as UInt8 RGB
-                    let stemR = UInt8(min(max(stem.r * 255, 0), 255))
-                    let stemG = UInt8(min(max(stem.g * 255, 0), 255))
-                    let stemB = UInt8(min(max(stem.b * 255, 0), 255))
-
-                    stemImage = renderStemLayerFromSTFT(
-                        mags: mags,
-                        numFrames: Int(ss.num_frames),
-                        numBins: Int(ss.num_bins),
-                        sampleRate: Int(ss.sample_rate),
-                        dbMin: dbMinClamped,
-                        dbRange: dbRange,
-                        stemR: stemR, stemG: stemG, stemB: stemB
-                    )
+                } else {
+                    // Reuse cached image
+                    stemImage = i < _stemImageCache.count ? _stemImageCache[i] : nil
                 }
+
                 let wavPath = stem.wav_path != nil ? String(cString: stem.wav_path) : nil
                 return StemInfo(
                     id: name, name: name, color: color,
@@ -140,12 +148,6 @@ final class ViewState: ObservableObject {
         let clipEnd = state.clip.end_sample
         let clipRate = state.clip.sample_rate
         let variant = ModelVariantUI(rawValue: state.model_variant) ?? .standard
-
-        // Preview state
-        let previewPlaying = state.preview_playing != 0
-        let previewPosition = state.preview_position
-        let stemNSamples = state.stem_n_samples
-        let stemSampleRate = state.stem_sample_rate
 
         // Copy spectrogram data
         let specFrames = state.spectrogram.num_frames
@@ -175,22 +177,29 @@ final class ViewState: ObservableObject {
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            self.phase = phase
-            self.filename = filename
-            self.progress = progress
-            self.stageLabel = stageLabel
-            self.errorMessage = errorMessage
-            self.peaks = peaks
-            self.totalSamples = totalSamples
-            self.clipStartSample = clipStart
-            self.clipEndSample = clipEnd
-            self.clipSampleRate = clipRate
-            self.stems = stems
-            self.modelVariant = variant
-            self.previewPlaying = previewPlaying
-            self.previewPosition = previewPosition
-            self.stemNSamples = stemNSamples
-            self.stemSampleRate = stemSampleRate
+
+            // Guard every setter — only fire objectWillChange when data changed.
+            if self.phase != phase { self.phase = phase }
+            if self.filename != filename { self.filename = filename }
+            if self.progress != progress { self.progress = progress }
+            if self.stageLabel != stageLabel { self.stageLabel = stageLabel }
+            if self.errorMessage != errorMessage { self.errorMessage = errorMessage }
+            if self.totalSamples != totalSamples { self.totalSamples = totalSamples }
+            if self.clipStartSample != clipStart { self.clipStartSample = clipStart }
+            if self.clipEndSample != clipEnd { self.clipEndSample = clipEnd }
+            if self.clipSampleRate != clipRate { self.clipSampleRate = clipRate }
+            if self.modelVariant != variant { self.modelVariant = variant }
+
+            if peaksChanged { self.peaks = peaks }
+
+            // Only update stems when gain/solo/count actually changed
+            if rebuildStemImages || self.stemsNeedUpdate(stems) {
+                self.stems = stems
+            }
+            if rebuildStemImages {
+                self._stemImageCache = stems.map { $0.spectrogramImage }
+            }
+
             if specChanged {
                 self.spectrogramMags = specMags
                 self.spectrogramFrames = specFrames
@@ -199,6 +208,17 @@ final class ViewState: ObservableObject {
                 self.spectrogramImage = newSpecImage
             }
         }
+    }
+
+    /// Check if any stem gain/solo differs from current state.
+    private func stemsNeedUpdate(_ newStems: [StemInfo]) -> Bool {
+        guard newStems.count == stems.count else { return true }
+        for i in 0..<newStems.count {
+            if newStems[i].gain != stems[i].gain || newStems[i].isSoloed != stems[i].isSoloed {
+                return true
+            }
+        }
+        return false
     }
 
     // ── Derived properties ──────────────────────────────────────────
@@ -228,6 +248,23 @@ final class ViewState: ObservableObject {
         return Double(clipEndSample) / Double(clipSampleRate)
     }
 
+}
+
+// ── Preview / Playback State ─────────────────────────────────────────────
+
+/// Fast-changing playback state, separated from ViewState so only
+/// playhead and seek views re-render at 30fps (not the full view tree).
+final class PreviewState: ObservableObject {
+    @Published var previewPlaying: Bool = false
+    @Published var previewPosition: UInt64 = 0
+    @Published var stemNSamples: UInt64 = 0
+    @Published var stemSampleRate: UInt32 = 0
+    @Published var midiActive: Bool = false
+    @Published var midiPosition: UInt64 = 0
+    @Published var dawPlaying: Bool = false
+
+    // ── Derived ──────────────────────────────────────────────────────
+
     /// Preview position as a fraction 0–1.
     var previewFraction: Double {
         guard stemNSamples > 0 else { return 0 }
@@ -244,5 +281,34 @@ final class ViewState: ObservableObject {
     var stemDurationSeconds: Double {
         guard stemSampleRate > 0 else { return 0 }
         return Double(stemNSamples) / Double(stemSampleRate)
+    }
+
+    /// MIDI position as a fraction 0–1.
+    var midiFraction: Double {
+        guard stemNSamples > 0 else { return 0 }
+        return min(Double(midiPosition) / Double(stemNSamples), 1.0)
+    }
+
+    /// Lightweight update — just copies scalar values.
+    /// Guards each setter to avoid unnecessary objectWillChange.
+    func update(from state: DemucsUIState) {
+        let playing = state.preview_playing != 0
+        let position = state.preview_position
+        let nSamples = state.stem_n_samples
+        let sampleRate = state.stem_sample_rate
+        let midiActive = state.midi_active != 0
+        let midiPosition = state.midi_position
+        let dawPlaying = state.daw_playing != 0
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            if self.previewPlaying != playing { self.previewPlaying = playing }
+            if self.previewPosition != position { self.previewPosition = position }
+            if self.stemNSamples != nSamples { self.stemNSamples = nSamples }
+            if self.stemSampleRate != sampleRate { self.stemSampleRate = sampleRate }
+            if self.midiActive != midiActive { self.midiActive = midiActive }
+            if self.midiPosition != midiPosition { self.midiPosition = midiPosition }
+            if self.dawPlaying != dawPlaying { self.dawPlaying = dawPlaying }
+        }
     }
 }

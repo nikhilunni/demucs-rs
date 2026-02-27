@@ -32,10 +32,14 @@ struct StemStrip: View {
             }
             .frame(width: 56, alignment: .leading)
 
-            // Mini spectrogram (pre-rendered from stem's own audio)
-            StemSpectrogramView(image: stem.spectrogramImage)
-                .frame(height: 28)
-                .clipShape(RoundedRectangle(cornerRadius: 3))
+            // Mini spectrogram (pre-rendered from stem's own audio) with playhead + seek
+            ZStack {
+                StemSpectrogramView(image: stem.spectrogramImage)
+                StemPlayheadOverlay()
+                StemSeekGesture()
+            }
+            .frame(height: 28)
+            .clipShape(RoundedRectangle(cornerRadius: 3))
 
             // Solo button — click: exclusive solo, Cmd+click: additive toggle
             SoloButton(isActive: stem.isSoloed, activeColor: Theme.accentCool) {
@@ -146,6 +150,67 @@ struct SoloButton: View {
         .buttonStyle(.plain)
         .onHover { h in
             withAnimation(Theme.quickAnimation) { isHovered = h }
+        }
+    }
+}
+
+/// Playhead overlay for stem mini spectrograms.
+/// Separate view so only this re-renders at 30fps, not the entire StemStrip.
+struct StemPlayheadOverlay: View {
+    @EnvironmentObject var previewState: PreviewState
+
+    var body: some View {
+        GeometryReader { geo in
+            if previewState.stemNSamples > 0 {
+                let previewX = geo.size.width * previewState.previewFraction
+
+                // MIDI region (when key held)
+                if previewState.midiActive {
+                    let midiX = geo.size.width * previewState.midiFraction
+                    let minX = min(previewX, midiX)
+                    let maxX = max(previewX, midiX)
+
+                    Rectangle()
+                        .fill(Theme.accentCool.opacity(0.15))
+                        .frame(width: max(maxX - minX, 0), height: geo.size.height)
+                        .offset(x: minX)
+
+                    Rectangle()
+                        .fill(Theme.accentCool.opacity(0.6))
+                        .frame(width: 1, height: geo.size.height)
+                        .offset(x: midiX - 0.5)
+                }
+
+                // Preview playhead
+                Rectangle()
+                    .fill(Color.white.opacity(0.8))
+                    .frame(width: 1, height: geo.size.height)
+                    .offset(x: previewX - 0.5)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// Drag-to-seek gesture on stem mini spectrograms — controls the same global seek.
+struct StemSeekGesture: View {
+    @EnvironmentObject var previewState: PreviewState
+    @EnvironmentObject var handler: CallbackHandler
+
+    var body: some View {
+        GeometryReader { geo in
+            Color.clear
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            if previewState.stemNSamples > 0 {
+                                let fraction = max(0, min(1, value.location.x / geo.size.width))
+                                let sample = UInt64(fraction * Double(previewState.stemNSamples))
+                                handler.previewSeek(samplePosition: sample)
+                            }
+                        }
+                )
         }
     }
 }

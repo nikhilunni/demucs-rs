@@ -60,6 +60,15 @@ pub struct SharedState {
 
     /// UI preview: playback position in samples (reset to 0 on play, advanced by audio thread).
     pub preview_position: AtomicU64,
+
+    /// MIDI gated playback: whether any MIDI notes are currently held.
+    pub midi_active: AtomicBool,
+
+    /// MIDI gated playback: current sample position into the stem buffers.
+    pub midi_position: AtomicU64,
+
+    /// Whether the DAW transport is currently playing (set by audio thread each block).
+    pub daw_playing: AtomicBool,
 }
 
 impl SharedState {
@@ -80,6 +89,9 @@ impl SharedState {
             stem_wav_paths: RwLock::new(Vec::new()),
             preview_playing: AtomicBool::new(false),
             preview_position: AtomicU64::new(0),
+            midi_active: AtomicBool::new(false),
+            midi_position: AtomicU64::new(0),
+            daw_playing: AtomicBool::new(false),
         }
     }
 

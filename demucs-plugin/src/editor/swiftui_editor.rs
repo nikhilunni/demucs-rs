@@ -90,6 +90,9 @@ pub struct DemucsUIState {
     pub preview_position: u64,
     pub stem_n_samples: u64,
     pub stem_sample_rate: u32,
+    pub midi_active: u32,
+    pub midi_position: u64,
+    pub daw_playing: u32,
 }
 
 #[repr(C)]
@@ -595,6 +598,9 @@ fn build_ui_state(
             Some(b) => b.sample_rate,
             None => 0,
         },
+        midi_active: shared.midi_active.load(Ordering::Relaxed) as u32,
+        midi_position: shared.midi_position.load(Ordering::Relaxed),
+        daw_playing: shared.daw_playing.load(Ordering::Relaxed) as u32,
     };
 
     let keeper = StateKeeper {

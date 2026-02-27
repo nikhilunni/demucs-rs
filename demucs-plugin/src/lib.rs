@@ -124,6 +124,7 @@ impl Plugin for DemucsPlugin {
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         // 1. Drain MIDI events — update note counter.
+        let was_held = self.notes_held;
         while let Some(event) = context.next_event() {
             match event {
                 NoteEvent::NoteOn { .. } => self.notes_held += 1,
@@ -134,9 +135,31 @@ impl Plugin for DemucsPlugin {
             }
         }
 
+        // When first MIDI note pressed, start playback from preview position.
+        if was_held == 0 && self.notes_held > 0 {
+            self.midi_position =
+                self.shared.preview_position.load(Ordering::Relaxed) as usize;
+        }
+
+        // Update MIDI active state for GUI playhead.
+        self.shared
+            .midi_active
+            .store(self.notes_held > 0, Ordering::Relaxed);
+
         // 2. Determine playback source.
-        let preview_playing = self.shared.preview_playing.load(Ordering::Relaxed);
         let transport = context.transport();
+
+        // Publish DAW transport state for the GUI.
+        self.shared
+            .daw_playing
+            .store(transport.playing, Ordering::Relaxed);
+
+        // Auto-pause UI preview when DAW starts playing.
+        if transport.playing {
+            self.shared.preview_playing.store(false, Ordering::Relaxed);
+        }
+
+        let preview_playing = self.shared.preview_playing.load(Ordering::Relaxed);
         let playback_pos = if self.notes_held > 0 {
             // MIDI gated: use transport when playing, free-run when stopped.
             if transport.playing {
@@ -174,6 +197,13 @@ impl Plugin for DemucsPlugin {
             audio::write_silence(buffer, aux);
             return ProcessStatus::KeepAlive;
         };
+
+        // Store MIDI position for GUI playhead.
+        if self.notes_held > 0 {
+            self.shared
+                .midi_position
+                .store(playback_pos as u64, Ordering::Relaxed);
+        }
 
         // 3. Serve stems at the computed position.
         audio::serve_stems(buffer, aux, &self.shared.stem_buffers, &self.params, playback_pos)

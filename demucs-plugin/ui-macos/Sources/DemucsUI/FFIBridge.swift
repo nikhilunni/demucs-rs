@@ -5,17 +5,20 @@ import CDemucsTypes
 /// Coordinator that owns the SwiftUI view hierarchy and bridges FFI calls.
 final class ViewCoordinator {
     let viewState: ViewState
+    let previewState: PreviewState
     let callbacks: DemucsCallbacks
     let hostingView: NSHostingView<AnyView>
 
     init(parent: NSView, callbacks: DemucsCallbacks, width: UInt32, height: UInt32) {
         self.callbacks = callbacks
         self.viewState = ViewState()
+        self.previewState = PreviewState()
 
         let callbackHandler = CallbackHandler(callbacks: callbacks)
         let rootView = DemucsEditorView()
             .environmentObject(viewState)
             .environmentObject(callbackHandler)
+            .environmentObject(previewState)
 
         self.hostingView = NSHostingView(rootView: AnyView(rootView))
         hostingView.frame = NSRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))
@@ -49,6 +52,7 @@ public func demucsUIUpdate(
     _ state: DemucsUIState
 ) {
     let coordinator = Unmanaged<ViewCoordinator>.fromOpaque(handle).takeUnretainedValue()
+    coordinator.previewState.update(from: state)
     coordinator.viewState.update(from: state)
 }
 
