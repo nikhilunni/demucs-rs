@@ -138,10 +138,42 @@ jobs:
           name: demucs-${{ matrix.target }}
           path: demucs-${{ matrix.target }}.${{ matrix.archive }}
 
+  # ── Plugin bundles (macOS only) ─────────────────────────────
+  build-plugin:
+    name: Plugin (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: plugin-macos
+
+      - name: Bundle plugin
+        run: cargo xtask bundle demucs-plugin --release --target aarch64-apple-darwin
+
+      - name: Package plugin bundles
+        run: |
+          cd target/bundled
+          zip -r ../../Demucs-vst3-aarch64-apple-darwin.zip Demucs.vst3
+          zip -r ../../Demucs-clap-aarch64-apple-darwin.zip Demucs.clap
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: demucs-plugin-macos
+          path: |
+            Demucs-vst3-aarch64-apple-darwin.zip
+            Demucs-clap-aarch64-apple-darwin.zip
+
   # ── GitHub Release ─────────────────────────────────────────
   create-release:
     name: Create Release
-    needs: build-cli
+    needs: [build-cli, build-plugin]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

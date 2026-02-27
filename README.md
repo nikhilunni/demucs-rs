@@ -8,7 +8,7 @@
 
 A native Rust implementation of [HTDemucs v4](https://arxiv.org/abs/2211.08553) — state-of-the-art music source separation. Splits any song into individual stems (drums, bass, vocals, etc.) using GPU-accelerated inference via [Burn](https://burn.dev).
 
-Runs as a **native CLI** (Metal on macOS, Vulkan on Linux/Windows) or entirely **in the browser** via WebAssembly + WebGPU — no server, no uploads, fully local.
+Runs as a **native CLI** (Metal on macOS, Vulkan on Linux/Windows), entirely **in the browser** via WebAssembly + WebGPU, or as a **DAW plugin** (VST3/CLAP, macOS) — no server, no uploads, fully local.
 
 ![Spectrogram view with model selection](screenshots/02-spectrogram.png)
 
@@ -16,10 +16,53 @@ Runs as a **native CLI** (Metal on macOS, Vulkan on Linux/Windows) or entirely *
 
 - **Three model variants** — Standard (4-stem), 6-Stem (adds guitar & piano), and Fine-Tuned (best quality)
 - **GPU accelerated** — Metal, Vulkan, and WebGPU backends via Burn's wgpu support
+- **DAW plugin** — VST3/CLAP instrument plugin with native macOS UI, MIDI-gated stem playback, and per-stem aux outputs
 - **Browser app** — drag-and-drop web UI running 100% locally in your browser through WebAssembly
 - **Native CLI** — fast command-line inference with progress tracking
 - **Spectrogram visualization** — magma-colormap spectrograms with frequency axis labels
 - **Multi-track playback** — solo, mute, and download individual stems in the web UI
+
+## DAW Plugin
+
+The plugin runs as a VST3 or CLAP instrument in any DAW on macOS. Drop in an audio file, run separation, and play back individual stems — driven entirely by MIDI input.
+
+> **Note:** The plugin is currently macOS-only (native SwiftUI UI with Metal GPU inference).
+
+**Drop an audio file, pick a model, and run separation:**
+
+![Audio loaded with model selection](screenshots/plugin-2.png)
+
+**Per-stem mixer with spectrograms:**
+
+![Stems ready with mixer](screenshots/plugin-5.png)
+
+### How it works
+
+1. **Load audio** — drag a file from your DAW or Finder into the plugin (WAV, AIFF, MP3, FLAC)
+2. **Choose a model** and click **Run separation** — model weights are downloaded automatically on first use and cached for future runs
+3. **Play stems via MIDI** — any MIDI note triggers playback, releasing all notes stops it. Playback always starts from beat 0 in the DAW
+4. **Preview in the UI** — use the built-in transport to audition stems without MIDI
+
+### Mixer & routing
+
+- **Main output** is a stereo mix with per-stem gain sliders and solo buttons
+- **Solo** isolates a stem in the main mix — hold Cmd and click to solo multiple stems
+- **Aux outputs** provide the raw separated stems on dedicated stereo buses (Drums, Bass, Other, Vocals, Guitar, Piano), so you can route each stem to its own mixer channel in your DAW
+
+### Installation
+
+Download `Demucs.vst3` or `Demucs.clap` from the [latest release](https://github.com/nikhilunni/demucs-rs/releases) and copy to:
+
+- **VST3:** `~/Library/Audio/Plug-Ins/VST3/`
+- **CLAP:** `~/Library/Audio/Plug-Ins/CLAP/`
+
+Since the plugin is not code-signed, macOS will quarantine it on first launch. Remove the quarantine flag:
+
+```bash
+xattr -cr ~/Library/Audio/Plug-Ins/VST3/Demucs.vst3
+# or
+xattr -cr ~/Library/Audio/Plug-Ins/CLAP/Demucs.clap
+```
 
 ## Web App
 
@@ -118,6 +161,7 @@ make web
 
 | Target | Description |
 |--------|-------------|
+| `make plugin` | Bundle VST3 + CLAP plugin (release) |
 | `make cli` | Build native CLI (release) |
 | `make wasm` | Build WASM (debug) |
 | `make wasm-release` | Build WASM (release, optimized) |
@@ -139,6 +183,7 @@ demucs-rs/
 ├── demucs-core/     Core ML inference library (model, DSP, weights)
 │                    Compiles to both native and wasm32-unknown-unknown
 ├── demucs-cli/      Native CLI binary (clap, symphonia, indicatif)
+├── demucs-plugin/   DAW plugin — VST3/CLAP via nih-plug (macOS, SwiftUI editor)
 ├── demucs-wasm/     Thin wasm-bindgen adapter over demucs-core
 ├── web/             React + TypeScript frontend (Vite)
 └── bench/           Python benchmark & validation suite
