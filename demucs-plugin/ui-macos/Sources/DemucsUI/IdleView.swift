@@ -11,7 +11,7 @@ struct IdleView: View {
     @State private var borderPhase: CGFloat = 0
     @State private var iconFloat: Bool = false
 
-    private let supportedFormats = ["WAV", "AIFF", "MP3", "FLAC"]
+    private let supportedFormats = ["WAV", "AIFF", "FLAC", "MP3"]
 
     var body: some View {
         ZStack {
@@ -114,7 +114,7 @@ struct IdleView: View {
             guard let data = item as? Data,
                   let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
             let ext = url.pathExtension.lowercased()
-            if ["wav", "wave", "aiff", "aif", "mp3", "flac"].contains(ext) {
+            if ["wav", "wave", "aiff", "aif", "mp3", "flac", "ogg", "m4a", "aac", "mp4"].contains(ext) {
                 callbackHandler.fileDrop(path: url.path)
             }
         }
@@ -128,6 +128,8 @@ struct IdleView: View {
             UTType(filenameExtension: "aiff")!,
             UTType(filenameExtension: "mp3")!,
             UTType(filenameExtension: "flac")!,
+            UTType(filenameExtension: "ogg")!,
+            UTType(filenameExtension: "m4a")!,
         ]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false

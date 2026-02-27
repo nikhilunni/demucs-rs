@@ -61,7 +61,7 @@ export function DropZone({ onFile }: Props) {
           </svg>
         </div>
         <span className="drop-title">Drop an audio file here</span>
-        <span className="drop-hint">WAV, MP3, FLAC, OGG — or click to browse</span>
+        <span className="drop-hint">Supports most audio formats — or click to browse</span>
       </div>
 
       <input

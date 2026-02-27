@@ -48,12 +48,12 @@ Model weights are downloaded automatically from Hugging Face on first use (both 
 ## CLI
 
 ```
-Separate audio stems from a WAV file
+Separate audio stems from a music file
 
 Usage: demucs [OPTIONS] <INPUT>
 
 Arguments:
-  <INPUT>  Input WAV file (stereo, any sample rate)
+  <INPUT>  Input audio file (WAV, AIFF, FLAC, MP3, OGG, M4A/AAC — stereo or mono, any sample rate)
 
 Options:
   -m, --model <MODEL>    Model variant [default: htdemucs]
@@ -70,13 +70,13 @@ Options:
 
 ```bash
 # Separate all 4 stems
-demucs song.wav
+demucs song.mp3
 
 # Extract only vocals
-demucs song.wav -s vocals
+demucs song.mp3 -s vocals
 
 # Use the 6-stem model, output to a custom directory
-demucs song.wav -m htdemucs_6s -o ./my_stems/
+demucs song.flac -m htdemucs_6s -o ./my_stems/
 
 # Best quality with the fine-tuned model
 demucs song.wav -m htdemucs_ft
@@ -98,7 +98,7 @@ demucs song.wav -m htdemucs_ft
 make cli
 
 # Run the CLI directly
-cargo run -p demucs-cli --release -- song.wav
+cargo run -p demucs-cli --release -- song.mp3
 ```
 
 ### Web App (local development)
@@ -138,7 +138,7 @@ cargo test -p demucs-core
 demucs-rs/
 ├── demucs-core/     Core ML inference library (model, DSP, weights)
 │                    Compiles to both native and wasm32-unknown-unknown
-├── demucs-cli/      Native CLI binary (clap, hound, indicatif)
+├── demucs-cli/      Native CLI binary (clap, symphonia, indicatif)
 ├── demucs-wasm/     Thin wasm-bindgen adapter over demucs-core
 ├── web/             React + TypeScript frontend (Vite)
 └── bench/           Python benchmark & validation suite

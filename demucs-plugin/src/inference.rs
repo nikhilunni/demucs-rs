@@ -27,7 +27,7 @@ type B = burn::backend::wgpu::Wgpu;
 
 /// Commands sent from the GUI/plugin to the inference thread.
 pub enum InferenceCommand {
-    /// Load an audio file — read WAV, hash content, show waveform.
+    /// Load an audio file — decode, hash content, show waveform.
     LoadAudio { path: PathBuf },
 
     /// Run separation on the currently loaded audio.
@@ -124,11 +124,11 @@ fn handle_load_audio(shared: &Arc<SharedState>, path: &std::path::Path) {
         }
     };
 
-    // Parse WAV
-    let (left, right, sample_rate) = match read_wav(path) {
+    // Decode audio file
+    let (left, right, sample_rate) = match read_audio(path) {
         Ok(result) => result,
         Err(e) => {
-            set_error(shared, format!("Failed to read WAV: {e}"));
+            set_error(shared, format!("Failed to read audio: {e}"));
             return;
         }
     };
@@ -511,43 +511,123 @@ fn download_model(info: &ModelInfo, shared: &SharedState) -> Result<Vec<u8>, Str
     Ok(data)
 }
 
-/// Read a stereo WAV file, returning (left, right, sample_rate).
-fn read_wav(path: &std::path::Path) -> Result<(Vec<f32>, Vec<f32>, u32), String> {
-    use hound::{SampleFormat, WavReader};
+/// Read a stereo audio file, returning (left, right, sample_rate).
+/// Supports WAV, AIFF, FLAC, MP3, OGG Vorbis, and AAC/M4A via Symphonia.
+fn read_audio(path: &std::path::Path) -> Result<(Vec<f32>, Vec<f32>, u32), String> {
+    use symphonia::core::audio::SampleBuffer;
+    use symphonia::core::codecs::DecoderOptions;
+    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
 
-    let reader = WavReader::open(path).map_err(|e| format!("{e}"))?;
-    let spec = reader.spec();
-    if spec.channels != 2 {
-        return Err(format!(
-            "Expected stereo (2 channels), got {}",
-            spec.channels
-        ));
+    let file = std::fs::File::open(path).map_err(|e| format!("Failed to open file: {e}"))?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
     }
 
-    let sample_rate = spec.sample_rate;
-    let samples: Vec<f32> = match spec.sample_format {
-        SampleFormat::Float => reader
-            .into_samples::<f32>()
-            .collect::<hound::Result<Vec<f32>>>()
-            .map_err(|e| format!("{e}"))?,
-        SampleFormat::Int => {
-            let max_val = (1u32 << (spec.bits_per_sample - 1)) as f32;
-            reader
-                .into_samples::<i32>()
-                .collect::<hound::Result<Vec<i32>>>()
-                .map_err(|e| format!("{e}"))?
-                .iter()
-                .map(|&s| s as f32 / max_val)
-                .collect()
-        }
-    };
+    let probed = symphonia::default::get_probe()
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
+        .map_err(|e| format!("Unsupported audio format: {e}"))?;
 
-    let n = samples.len() / 2;
-    let mut left = Vec::with_capacity(n);
-    let mut right = Vec::with_capacity(n);
-    for frame in samples.chunks_exact(2) {
-        left.push(frame[0]);
-        right.push(frame[1]);
+    let mut format = probed.format;
+
+    let track = format
+        .default_track()
+        .ok_or("No audio track found")?
+        .clone();
+
+    // Channel count may be unknown upfront for some codecs (e.g. AAC/M4A).
+    // We'll detect it from the first decoded packet if needed.
+    let channels_hint = track.codec_params.channels.map(|c| c.count());
+    if let Some(ch) = channels_hint {
+        if ch > 2 {
+            return Err(format!(
+                "Expected mono or stereo audio, got {} channel(s)",
+                ch
+            ));
+        }
+    }
+
+    let sample_rate = track
+        .codec_params
+        .sample_rate
+        .ok_or("Could not determine sample rate")?;
+
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+        .map_err(|e| format!("Failed to create decoder: {e}"))?;
+
+    let mut left = Vec::new();
+    let mut right = Vec::new();
+    let mut channels: Option<usize> = channels_hint;
+
+    loop {
+        let packet = match format.next_packet() {
+            Ok(p) => p,
+            Err(symphonia::core::errors::Error::IoError(ref e))
+                if e.kind() == std::io::ErrorKind::UnexpectedEof =>
+            {
+                break;
+            }
+            Err(e) => return Err(format!("Error reading audio: {e}")),
+        };
+
+        if packet.track_id() != track.id {
+            continue;
+        }
+
+        let decoded = match decoder.decode(&packet) {
+            Ok(d) => d,
+            Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
+            Err(e) => return Err(format!("Error decoding audio: {e}")),
+        };
+
+        let spec = *decoded.spec();
+        let ch = spec.channels.count();
+
+        // Detect channel count from first decoded packet if not known upfront
+        if channels.is_none() {
+            if ch > 2 {
+                return Err(format!(
+                    "Expected mono or stereo audio, got {} channel(s)",
+                    ch
+                ));
+            }
+            channels = Some(ch);
+        }
+
+        let n_frames = decoded.capacity();
+        let mut sample_buf = SampleBuffer::<f32>::new(n_frames as u64, spec);
+        sample_buf.copy_interleaved_ref(decoded);
+        let samples = sample_buf.samples();
+
+        if ch == 1 {
+            for &s in samples {
+                left.push(s);
+                right.push(s);
+            }
+        } else {
+            for frame in samples.chunks_exact(2) {
+                left.push(frame[0]);
+                right.push(frame[1]);
+            }
+        }
+    }
+
+    if left.is_empty() {
+        return Err(format!(
+            "No audio samples decoded from: {}",
+            path.display()
+        ));
     }
 
     Ok((left, right, sample_rate))

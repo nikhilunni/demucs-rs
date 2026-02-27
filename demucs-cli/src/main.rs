@@ -26,9 +26,9 @@ type B = burn::backend::wgpu::Wgpu;
 type B = burn::backend::NdArray<f32>;
 
 #[derive(Parser)]
-#[command(name = "demucs", about = "Separate audio stems from a WAV file")]
+#[command(name = "demucs", about = "Separate audio stems from a music file")]
 struct Cli {
-    /// Input WAV file (stereo, any sample rate)
+    /// Input audio file (WAV, AIFF, FLAC, MP3, OGG, M4A/AAC — stereo or mono, any sample rate)
     input: PathBuf,
 
     /// Model variant
@@ -126,7 +126,7 @@ fn main() -> Result<()> {
 
     // 4. Read input audio
     eprintln!("Reading {}", cli.input.display());
-    let (left, right, sample_rate) = audio::read_wav(&cli.input)?;
+    let (left, right, sample_rate) = audio::read_audio(&cli.input)?;
     let duration_secs = left.len() as f64 / sample_rate as f64;
     eprintln!(
         "  {} samples, {:.1}s, {} Hz, stereo",

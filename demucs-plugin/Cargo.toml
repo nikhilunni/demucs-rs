@@ -16,6 +16,7 @@ cubecl = { version = "0.9", default-features = false }
 
 # Audio I/O
 hound = "3"
+symphonia = { version = "0.5", features = ["mp3", "flac", "ogg", "wav", "pcm", "aac", "isomp4", "aiff"] }
 
 # Stem caching
 blake3 = "1"

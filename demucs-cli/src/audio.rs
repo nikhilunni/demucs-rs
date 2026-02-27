@@ -1,55 +1,115 @@
 use anyhow::{bail, Context, Result};
-use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
+use hound::{SampleFormat, WavSpec, WavWriter};
 use std::path::Path;
+use symphonia::core::audio::SampleBuffer;
+use symphonia::core::codecs::DecoderOptions;
+use symphonia::core::formats::FormatOptions;
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::meta::MetadataOptions;
+use symphonia::core::probe::Hint;
 
-/// Read a stereo WAV file, returning (left, right, sample_rate).
+/// Read a stereo audio file, returning (left, right, sample_rate).
 ///
-/// Accepts f32, i16, i24, and i32 sample formats. Non-stereo input is rejected.
-pub fn read_wav(path: &Path) -> Result<(Vec<f32>, Vec<f32>, u32)> {
-    let reader = WavReader::open(path)
-        .with_context(|| format!("Failed to open WAV file: {}", path.display()))?;
+/// Supports WAV, AIFF, FLAC, MP3, OGG Vorbis, and AAC/M4A via Symphonia.
+/// Mono files are duplicated to stereo. Non-mono/stereo input is rejected.
+pub fn read_audio(path: &Path) -> Result<(Vec<f32>, Vec<f32>, u32)> {
+    let file = std::fs::File::open(path)
+        .with_context(|| format!("Failed to open audio file: {}", path.display()))?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
-    let spec = reader.spec();
-    if spec.channels != 2 {
-        bail!(
-            "Expected stereo (2 channels), got {} channel(s). \
-             Mono-to-stereo conversion is not yet supported.",
-            spec.channels
-        );
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
     }
 
-    let sample_rate = spec.sample_rate;
-    let samples = read_samples(reader, spec)?;
-    let n_samples = samples.len() / 2;
-    let mut left = Vec::with_capacity(n_samples);
-    let mut right = Vec::with_capacity(n_samples);
+    let probed = symphonia::default::get_probe()
+        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .with_context(|| format!("Unsupported audio format: {}", path.display()))?;
 
-    for frame in samples.chunks_exact(2) {
-        left.push(frame[0]);
-        right.push(frame[1]);
+    let mut format = probed.format;
+
+    let track = format
+        .default_track()
+        .context("No audio track found")?
+        .clone();
+
+    // Channel count may be unknown upfront for some codecs (e.g. AAC/M4A).
+    // We'll detect it from the first decoded packet if needed.
+    let channels_hint = track.codec_params.channels.map(|c| c.count());
+    if let Some(ch) = channels_hint {
+        if ch > 2 {
+            bail!("Expected mono or stereo audio, got {} channel(s).", ch);
+        }
+    }
+
+    let sample_rate = track
+        .codec_params
+        .sample_rate
+        .context("Could not determine sample rate")?;
+
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+        .context("Failed to create audio decoder")?;
+
+    let mut left = Vec::new();
+    let mut right = Vec::new();
+    let mut channels: Option<usize> = channels_hint;
+
+    loop {
+        let packet = match format.next_packet() {
+            Ok(p) => p,
+            Err(symphonia::core::errors::Error::IoError(ref e))
+                if e.kind() == std::io::ErrorKind::UnexpectedEof =>
+            {
+                break;
+            }
+            Err(e) => return Err(e).context("Error reading audio packet"),
+        };
+
+        if packet.track_id() != track.id {
+            continue;
+        }
+
+        let decoded = match decoder.decode(&packet) {
+            Ok(d) => d,
+            Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
+            Err(e) => return Err(e).context("Error decoding audio"),
+        };
+
+        let spec = *decoded.spec();
+        let ch = spec.channels.count();
+
+        // Detect channel count from first decoded packet if not known upfront
+        if channels.is_none() {
+            if ch > 2 {
+                bail!("Expected mono or stereo audio, got {} channel(s).", ch);
+            }
+            channels = Some(ch);
+        }
+
+        let n_frames = decoded.capacity();
+        let mut sample_buf = SampleBuffer::<f32>::new(n_frames as u64, spec);
+        sample_buf.copy_interleaved_ref(decoded);
+        let samples = sample_buf.samples();
+
+        if ch == 1 {
+            for &s in samples {
+                left.push(s);
+                right.push(s);
+            }
+        } else {
+            for frame in samples.chunks_exact(2) {
+                left.push(frame[0]);
+                right.push(frame[1]);
+            }
+        }
+    }
+
+    if left.is_empty() {
+        bail!("No audio samples decoded from: {}", path.display());
     }
 
     Ok((left, right, sample_rate))
-}
-
-/// Read interleaved samples from a WAV reader, normalizing to f32 in [-1, 1].
-fn read_samples(
-    reader: WavReader<std::io::BufReader<std::fs::File>>,
-    spec: WavSpec,
-) -> Result<Vec<f32>> {
-    match spec.sample_format {
-        SampleFormat::Float => {
-            let samples: hound::Result<Vec<f32>> = reader.into_samples::<f32>().collect();
-            Ok(samples.context("Failed to read f32 samples")?)
-        }
-        SampleFormat::Int => {
-            let bits = spec.bits_per_sample;
-            let max_val = (1u32 << (bits - 1)) as f32;
-            let samples: hound::Result<Vec<i32>> = reader.into_samples::<i32>().collect();
-            let samples = samples.context("Failed to read integer samples")?;
-            Ok(samples.iter().map(|&s| s as f32 / max_val).collect())
-        }
-    }
 }
 
 /// Write a stereo f32 WAV file.
