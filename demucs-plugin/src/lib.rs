@@ -285,6 +285,17 @@ impl DemucsPlugin {
                     Ok(buffers) => {
                         inference::compute_stem_spectrograms(&self.shared, &buffers);
 
+                        // Ensure WAV files exist for drag-and-drop
+                        match stem_cache.save_wavs(&key, &buffers) {
+                            Ok(paths) => {
+                                *self.shared.stem_wav_paths.write() = paths
+                                    .iter()
+                                    .map(|p| p.to_string_lossy().to_string())
+                                    .collect();
+                            }
+                            Err(e) => log::warn!("Failed to write WAV files: {e}"),
+                        }
+
                         // Restore content hash (needed for re-separation)
                         if let Ok(Some(hash)) = stem_cache.load_content_hash(&key) {
                             *self.shared.content_hash.write() = Some(hash);
