@@ -66,6 +66,9 @@ pub struct DemucsStemInfoFFI {
     pub g: f32,
     pub b: f32,
     pub spectrogram: DemucsSpectrogramFFI,
+    pub wav_path: *const c_char,
+    pub gain: f32,
+    pub is_soloed: u32,
 }
 
 #[repr(C)]
@@ -83,6 +86,10 @@ pub struct DemucsUIState {
     pub num_stems: u32,
     pub model_variant: DemucsModelVariantFFI,
     pub spectrogram: DemucsSpectrogramFFI,
+    pub preview_playing: u32,
+    pub preview_position: u64,
+    pub stem_n_samples: u64,
+    pub stem_sample_rate: u32,
 }
 
 #[repr(C)]
@@ -93,6 +100,10 @@ pub struct DemucsCallbacks {
     pub on_cancel: unsafe extern "C" fn(*mut c_void),
     pub on_dismiss_error: unsafe extern "C" fn(*mut c_void),
     pub on_clip_change: unsafe extern "C" fn(*mut c_void, DemucsClipFFI),
+    pub on_stem_gain: unsafe extern "C" fn(*mut c_void, u32, f32),
+    pub on_stem_solo: unsafe extern "C" fn(*mut c_void, u32, u32),
+    pub on_preview_toggle: unsafe extern "C" fn(*mut c_void),
+    pub on_preview_seek: unsafe extern "C" fn(*mut c_void, u64),
 }
 
 extern "C" {
@@ -112,14 +123,17 @@ extern "C" {
 struct CallbackContext {
     shared: Arc<SharedState>,
     cmd_tx: Sender<InferenceCommand>,
-    #[allow(dead_code)]
     params: Arc<DemucsParams>,
+    gui_context: Arc<dyn GuiContext>,
 }
 
 // ── C Callbacks (called from Swift) ─────────────────────────────────────────
 
 unsafe extern "C" fn cb_file_drop(ctx: *mut c_void, path: *const c_char) {
     let context = &*(ctx as *const CallbackContext);
+    // Stop preview on new file
+    context.shared.preview_playing.store(false, Ordering::Relaxed);
+    context.shared.preview_position.store(0, Ordering::Relaxed);
     let path_str = CStr::from_ptr(path).to_string_lossy().to_string();
     let _ = context
         .cmd_tx
@@ -134,6 +148,9 @@ unsafe extern "C" fn cb_separate(
     clip: DemucsClipFFI,
 ) {
     let context = &*(ctx as *const CallbackContext);
+    // Stop preview on new separation
+    context.shared.preview_playing.store(false, Ordering::Relaxed);
+    context.shared.preview_position.store(0, Ordering::Relaxed);
     let model_variant = match variant {
         DemucsModelVariantFFI::Standard => ModelVariant::Standard,
         DemucsModelVariantFFI::FineTuned => ModelVariant::FineTuned,
@@ -169,6 +186,53 @@ unsafe extern "C" fn cb_clip_change(ctx: *mut c_void, clip: DemucsClipFFI) {
         end_sample: clip.end_sample,
         sample_rate: clip.sample_rate,
     };
+}
+
+unsafe extern "C" fn cb_stem_gain(ctx: *mut c_void, stem_idx: u32, gain: f32) {
+    let context = &*(ctx as *const CallbackContext);
+    let param = &context.params.stem(stem_idx as usize).gain;
+    let ptr = param.as_ptr();
+    let normalized = param.preview_normalized(gain);
+    context.gui_context.raw_begin_set_parameter(ptr);
+    context.gui_context.raw_set_parameter_normalized(ptr, normalized);
+    context.gui_context.raw_end_set_parameter(ptr);
+}
+
+unsafe extern "C" fn cb_preview_toggle(ctx: *mut c_void) {
+    let context = &*(ctx as *const CallbackContext);
+    let is_playing = context.shared.preview_playing.load(Ordering::Relaxed);
+    if is_playing {
+        // Pause
+        context.shared.preview_playing.store(false, Ordering::Relaxed);
+    } else {
+        // If at end of track, reset to beginning before playing
+        let guard = context.shared.stem_buffers.load();
+        if let Some(buffers) = guard.as_ref() {
+            let pos = context.shared.preview_position.load(Ordering::Relaxed) as usize;
+            if pos >= buffers.n_samples {
+                context.shared.preview_position.store(0, Ordering::Relaxed);
+            }
+        }
+        context.shared.preview_playing.store(true, Ordering::Relaxed);
+    }
+}
+
+unsafe extern "C" fn cb_preview_seek(ctx: *mut c_void, sample_position: u64) {
+    let context = &*(ctx as *const CallbackContext);
+    context
+        .shared
+        .preview_position
+        .store(sample_position, Ordering::Relaxed);
+}
+
+unsafe extern "C" fn cb_stem_solo(ctx: *mut c_void, stem_idx: u32, soloed: u32) {
+    let context = &*(ctx as *const CallbackContext);
+    let param = &context.params.stem(stem_idx as usize).solo;
+    let ptr = param.as_ptr();
+    let normalized = if soloed != 0 { 1.0 } else { 0.0 };
+    context.gui_context.raw_begin_set_parameter(ptr);
+    context.gui_context.raw_set_parameter_normalized(ptr, normalized);
+    context.gui_context.raw_end_set_parameter(ptr);
 }
 
 // ── Editor Handle (Drop cleans up) ──────────────────────────────────────────
@@ -232,7 +296,7 @@ impl Editor for SwiftUIEditor {
     fn spawn(
         &self,
         parent: ParentWindowHandle,
-        _context: Arc<dyn GuiContext>,
+        context: Arc<dyn GuiContext>,
     ) -> Box<dyn std::any::Any + Send> {
         // Extract NSView pointer from parent handle
         let ns_view = extract_ns_view(&parent);
@@ -242,6 +306,7 @@ impl Editor for SwiftUIEditor {
             shared: self.shared.clone(),
             cmd_tx: self.cmd_tx.clone(),
             params: self.params.clone(),
+            gui_context: context,
         });
         let ctx_ptr = Box::into_raw(callback_ctx);
 
@@ -252,11 +317,25 @@ impl Editor for SwiftUIEditor {
             on_cancel: cb_cancel,
             on_dismiss_error: cb_dismiss_error,
             on_clip_change: cb_clip_change,
+            on_stem_gain: cb_stem_gain,
+
+            on_stem_solo: cb_stem_solo,
+            on_preview_toggle: cb_preview_toggle,
+            on_preview_seek: cb_preview_seek,
         };
 
         // Create the Swift UI (must be called on main thread — nih-plug guarantees this)
         let ui_handle =
             unsafe { demucs_ui_create(ns_view, callbacks, self.width, self.height) };
+
+        // Push initial state immediately so the UI doesn't flash Idle.
+        {
+            let spec_guard = self.shared.spectrogram.read();
+            let stem_spec_guard = self.shared.stem_spectrograms.read();
+            let (state, _keeper) =
+                build_ui_state(&self.shared, &self.params, &spec_guard, &stem_spec_guard);
+            unsafe { demucs_ui_update(ui_handle, state) };
+        }
 
         // Start polling thread
         let poll_stop = Arc::new(AtomicBool::new(false));
@@ -419,6 +498,7 @@ fn build_ui_state(
     let mut stems_ffi = Vec::new();
     let mut stem_names = Vec::new();
     let guard = shared.stem_buffers.load();
+    let wav_paths = shared.stem_wav_paths.read();
     if let Some(buffers) = guard.as_ref() {
         for (i, name) in buffers.stem_names.iter().enumerate() {
             let (r, g, b) = stem_color(name);
@@ -439,12 +519,25 @@ fn build_ui_state(
                     sample_rate: 0,
                 }
             };
+            // WAV path for drag-and-drop
+            let wav_path_ptr = if i < wav_paths.len() {
+                let cs = CString::new(wav_paths[i].as_str()).unwrap_or_default();
+                let ptr = cs.as_ptr();
+                stem_names.push(cs);
+                ptr
+            } else {
+                std::ptr::null()
+            };
+            let sp = params.stem(i);
             stems_ffi.push(DemucsStemInfoFFI {
                 name: name_cs.as_ptr(),
                 r,
                 g,
                 b,
                 spectrogram: stem_spec,
+                wav_path: wav_path_ptr,
+                gain: sp.gain.value(),
+                is_soloed: sp.solo.value() as u32,
             });
             stem_names.push(name_cs);
         }
@@ -491,6 +584,16 @@ fn build_ui_state(
                 num_bins: 0,
                 sample_rate: 0,
             },
+        },
+        preview_playing: shared.preview_playing.load(Ordering::Relaxed) as u32,
+        preview_position: shared.preview_position.load(Ordering::Relaxed),
+        stem_n_samples: match guard.as_ref() {
+            Some(b) => b.n_samples as u64,
+            None => 0,
+        },
+        stem_sample_rate: match guard.as_ref() {
+            Some(b) => b.sample_rate,
+            None => 0,
         },
     };
 

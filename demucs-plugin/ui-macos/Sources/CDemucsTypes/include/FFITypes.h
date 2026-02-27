@@ -53,6 +53,9 @@ typedef struct {
     float g;
     float b;
     DemucsSpectrogram spectrogram;   // per-stem spectrogram (valid when mags != NULL)
+    const char* wav_path;            // absolute path to stem WAV file (NULL if unavailable)
+    float gain;                      // 0.0–2.0 (current gain from DAW param)
+    uint32_t is_soloed;              // 0 or 1
 } DemucsStemInfo;
 
 // ── Full state snapshot (Rust -> Swift, pushed at ~30fps) ───────────
@@ -71,6 +74,10 @@ typedef struct {
     uint32_t num_stems;
     DemucsModelVariant model_variant;
     DemucsSpectrogram spectrogram;   // display spectrogram (valid when mags != NULL)
+    uint32_t preview_playing;    // 0 or 1
+    uint64_t preview_position;   // current sample position
+    uint64_t stem_n_samples;     // total stem length in samples
+    uint32_t stem_sample_rate;   // stem sample rate
 } DemucsUIState;
 
 // ── Callbacks (Swift -> Rust) ───────────────────────────────────────
@@ -82,6 +89,10 @@ typedef struct {
     void (*on_cancel)(void* ctx);
     void (*on_dismiss_error)(void* ctx);
     void (*on_clip_change)(void* ctx, DemucsClip clip);
+    void (*on_stem_gain)(void* ctx, uint32_t stem_idx, float gain);
+    void (*on_stem_solo)(void* ctx, uint32_t stem_idx, uint32_t soloed);
+    void (*on_preview_toggle)(void* ctx);
+    void (*on_preview_seek)(void* ctx, uint64_t sample_position);
 } DemucsCallbacks;
 
 // ── Swift-exposed functions (called from Rust) ──────────────────────

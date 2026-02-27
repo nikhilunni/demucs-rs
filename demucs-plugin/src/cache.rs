@@ -1,6 +1,8 @@
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::path::PathBuf;
+
+use hound::{SampleFormat, WavSpec, WavWriter};
 
 use crate::clip::ClipSelection;
 use crate::shared_state::{StemBuffers, StemChannel};
@@ -67,6 +69,44 @@ impl StemCache {
             n_samples: meta.n_samples,
             stem_names: meta.stem_names,
         })
+    }
+
+    /// Write stereo f32 WAV files for each stem, returning paths.
+    /// Files: `{cache_dir}/{key}/drums.wav`, `bass.wav`, etc.
+    pub fn save_wavs(&self, key: &str, buffers: &StemBuffers) -> io::Result<Vec<PathBuf>> {
+        let dir = self.stems_dir.join(key);
+        fs::create_dir_all(&dir)?;
+
+        let spec = WavSpec {
+            channels: 2,
+            sample_rate: buffers.sample_rate,
+            bits_per_sample: 32,
+            sample_format: SampleFormat::Float,
+        };
+
+        let mut paths = Vec::with_capacity(buffers.stem_names.len());
+        for (i, name) in buffers.stem_names.iter().enumerate() {
+            let path = dir.join(format!("{name}.wav"));
+            let file = fs::File::create(&path)?;
+            let buf_writer = io::BufWriter::with_capacity(256 * 1024, file);
+            let mut writer = WavWriter::new(buf_writer, spec)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            let stem = &buffers.stems[i];
+            for (l, r) in stem.left.iter().zip(&stem.right) {
+                writer
+                    .write_sample(*l)
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                writer
+                    .write_sample(*r)
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            }
+            writer
+                .finalize()
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            paths.push(path);
+        }
+
+        Ok(paths)
     }
 
     /// Save stems to disk cache.
@@ -162,11 +202,10 @@ fn read_raw_f32(path: &std::path::Path, expected_samples: usize) -> io::Result<V
 }
 
 fn write_raw_f32(path: &std::path::Path, samples: &[f32]) -> io::Result<()> {
-    let mut file = fs::File::create(path)?;
-    for &s in samples {
-        file.write_all(&s.to_le_bytes())?;
-    }
-    file.flush()
+    // Safety: f32 has no padding, and we write as little-endian (native on x86/ARM).
+    let bytes: &[u8] =
+        unsafe { std::slice::from_raw_parts(samples.as_ptr() as *const u8, samples.len() * 4) };
+    fs::write(path, bytes)
 }
 
 // ─── Hex encoding (avoid adding another dep) ─────────────────────────────

@@ -6,11 +6,12 @@ import CDemucsTypes
 struct StemStrip: View {
     let stem: StemInfo
     let busIndex: Int
+    @EnvironmentObject var handler: CallbackHandler
+    @EnvironmentObject var viewState: ViewState
 
     @State private var isHovered = false
-    @State private var isSoloed = false
-    @State private var isMuted = false
-    @State private var volume: Double = 80
+    @State private var localGain: Double = 1.0
+    @State private var isDragging = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -36,22 +37,45 @@ struct StemStrip: View {
                 .frame(height: 28)
                 .clipShape(RoundedRectangle(cornerRadius: 3))
 
-            // S/M buttons
-            HStack(spacing: 3) {
-                SMButton(label: "S", isActive: isSoloed, activeColor: Theme.accentCool) {
-                    isSoloed.toggle()
-                }
-                SMButton(label: "M", isActive: isMuted, activeColor: Theme.accent) {
-                    isMuted.toggle()
+            // Solo button — click: exclusive solo, Cmd+click: additive toggle
+            SoloButton(isActive: stem.isSoloed, activeColor: Theme.accentCool) {
+                let isCmd = NSEvent.modifierFlags.contains(.command)
+                if isCmd {
+                    // Cmd+click: toggle just this stem
+                    handler.stemSolo(stemIndex: busIndex, soloed: !stem.isSoloed)
+                } else if stem.isSoloed && viewState.stems.filter(\.isSoloed).count == 1 {
+                    // Only soloed stem clicked again: unsolo (back to all playing)
+                    handler.stemSolo(stemIndex: busIndex, soloed: false)
+                } else {
+                    // Exclusive solo: solo this, unsolo all others
+                    for i in 0..<viewState.stems.count {
+                        handler.stemSolo(stemIndex: i, soloed: i == busIndex)
+                    }
                 }
             }
 
-            // Volume slider
-            Slider(value: $volume, in: 0...100)
-                .frame(width: 50)
+            // Gain slider — local state for smooth dragging, synced with model
+            Slider(value: $localGain, in: 0...2, onEditingChanged: { editing in
+                isDragging = editing
+                if !editing {
+                    handler.stemGain(stemIndex: busIndex, gain: Float(localGain))
+                }
+            })
+                .frame(width: 80)
                 .tint(Theme.textDim)
+                .onChange(of: localGain) { _ in
+                    if isDragging {
+                        handler.stemGain(stemIndex: busIndex, gain: Float(localGain))
+                    }
+                }
+                .onChange(of: stem.gain) { newValue in
+                    if !isDragging {
+                        localGain = Double(newValue)
+                    }
+                }
+                .onAppear { localGain = Double(stem.gain) }
 
-            // Drag handle
+            // Drag handle — drag stem WAV file into DAW
             VStack(spacing: 2) {
                 ForEach(0..<3, id: \.self) { _ in
                     HStack(spacing: 2) {
@@ -61,7 +85,15 @@ struct StemStrip: View {
                 }
             }
             .foregroundColor(isHovered ? Theme.textDim : Theme.textMicro)
-            .frame(width: 20)
+            .frame(width: 20, height: 28)
+            .contentShape(Rectangle())
+            .onDrag {
+                if let path = stem.wavPath {
+                    let url = URL(fileURLWithPath: path)
+                    return NSItemProvider(contentsOf: url) ?? NSItemProvider()
+                }
+                return NSItemProvider()
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -82,9 +114,8 @@ struct StemStrip: View {
     }
 }
 
-/// Small Solo/Mute button.
-struct SMButton: View {
-    let label: String
+/// Solo toggle button with generous hit area.
+struct SoloButton: View {
     let isActive: Bool
     let activeColor: Color
     let action: () -> Void
@@ -93,23 +124,24 @@ struct SMButton: View {
 
     var body: some View {
         Button(action: action) {
-            Text(label)
-                .font(.system(size: 9, weight: .bold))
+            Text("S")
+                .font(.system(size: 10, weight: .bold))
                 .foregroundColor(
                     isActive ? activeColor : (isHovered ? Theme.textDim : Theme.textMicro)
                 )
-                .frame(width: 22, height: 22)
+                .frame(width: 28, height: 28)
                 .background(
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: 5)
                         .fill(isActive ? activeColor.opacity(0.15) : Color.clear)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: 5)
                         .stroke(
                             isActive ? activeColor.opacity(0.3) : Theme.border.opacity(0.3),
                             lineWidth: 1
                         )
                 )
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { h in

@@ -98,4 +98,20 @@ final class CallbackHandler: ObservableObject {
         )
         callbacks.on_clip_change?(callbacks.context, clip)
     }
+
+    func stemGain(stemIndex: Int, gain: Float) {
+        callbacks.on_stem_gain?(callbacks.context, UInt32(stemIndex), gain)
+    }
+
+    func stemSolo(stemIndex: Int, soloed: Bool) {
+        callbacks.on_stem_solo?(callbacks.context, UInt32(stemIndex), soloed ? 1 : 0)
+    }
+
+    func previewToggle() {
+        callbacks.on_preview_toggle?(callbacks.context)
+    }
+
+    func previewSeek(samplePosition: UInt64) {
+        callbacks.on_preview_seek?(callbacks.context, samplePosition)
+    }
 }

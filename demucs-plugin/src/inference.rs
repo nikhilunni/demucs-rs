@@ -208,6 +208,17 @@ fn handle_separate(
         if stem_cache.is_cached(&cache_key) {
             match stem_cache.load(&cache_key) {
                 Ok(buffers) => {
+                    // Ensure WAV files exist (write if missing)
+                    match stem_cache.save_wavs(&cache_key, &buffers) {
+                        Ok(paths) => {
+                            *shared.stem_wav_paths.write() = paths
+                                .iter()
+                                .map(|p| p.to_string_lossy().to_string())
+                                .collect();
+                        }
+                        Err(e) => log::warn!("Failed to write WAV files: {e}"),
+                    }
+                    compute_stem_spectrograms(shared, &buffers);
                     shared.stem_buffers.store(Arc::new(Some(buffers)));
                     *shared.cache_key.write() = Some(cache_key);
                     shared.set_progress(1.0);
@@ -360,32 +371,25 @@ fn handle_separate(
                 stem_names: stem_names.clone(),
             };
 
-            // Save to disk cache
+            // Save to disk cache + write WAV files for drag-and-drop
             if let Ok(stem_cache) = StemCache::new() {
                 if let Err(e) = stem_cache.save(&cache_key, &buffers, model_id, &clip) {
                     log::warn!("Failed to cache stems: {e}");
+                }
+                match stem_cache.save_wavs(&cache_key, &buffers) {
+                    Ok(paths) => {
+                        *shared.stem_wav_paths.write() = paths
+                            .iter()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .collect();
+                    }
+                    Err(e) => log::warn!("Failed to write WAV files: {e}"),
                 }
             }
 
             // Compute per-stem spectrograms for display
             *shared.stage_label.write() = "Computing spectrograms...".to_string();
-            let mut stem_specs = Vec::new();
-            for stem in &buffers.stems {
-                let mono: Vec<f32> = stem.left.iter()
-                    .zip(&stem.right)
-                    .map(|(l, r)| (l + r) * 0.5)
-                    .collect();
-                match demucs_core::dsp::spectrogram::compute_spectrogram(&mono) {
-                    Ok(data) => stem_specs.push(crate::shared_state::DisplaySpectrogram {
-                        mags: data.mags,
-                        num_frames: data.num_frames,
-                        num_bins: data.num_bins,
-                        sample_rate: audio_sample_rate,
-                    }),
-                    Err(e) => log::warn!("Failed to compute stem spectrogram: {e}"),
-                }
-            }
-            *shared.stem_spectrograms.write() = stem_specs;
+            compute_stem_spectrograms(shared, &buffers);
 
             // Store in shared state — transition to Ready immediately
             shared.stem_buffers.store(Arc::new(Some(buffers)));
@@ -409,6 +413,31 @@ fn handle_separate(
             set_error(shared, format!("Separation failed: {e}"));
         }
     }
+}
+
+/// Compute per-stem spectrograms and store them in shared state.
+/// Called after stems are available (fresh inference or cache hit).
+pub fn compute_stem_spectrograms(shared: &SharedState, buffers: &crate::shared_state::StemBuffers) {
+    let sample_rate = buffers.sample_rate;
+    let mut stem_specs = Vec::with_capacity(buffers.stems.len());
+    for stem in &buffers.stems {
+        let mono: Vec<f32> = stem
+            .left
+            .iter()
+            .zip(&stem.right)
+            .map(|(l, r)| (l + r) * 0.5)
+            .collect();
+        match demucs_core::dsp::spectrogram::compute_spectrogram(&mono) {
+            Ok(data) => stem_specs.push(DisplaySpectrogram {
+                mags: data.mags,
+                num_frames: data.num_frames,
+                num_bins: data.num_bins,
+                sample_rate,
+            }),
+            Err(e) => log::warn!("Failed to compute stem spectrogram: {e}"),
+        }
+    }
+    *shared.stem_spectrograms.write() = stem_specs;
 }
 
 fn set_error(shared: &SharedState, message: String) {

@@ -32,7 +32,7 @@ parking_lot = "0.12"
 pollster = "0.4"
 
 # Model download
-ureq = { version = "2", default-features = false, features = ["native-tls", "gzip"] }
+ureq = { version = "2", default-features = false, features = ["tls", "gzip"] }
 
 # Logging
 log = "0.4"

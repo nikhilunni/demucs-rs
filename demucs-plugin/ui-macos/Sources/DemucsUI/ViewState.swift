@@ -14,6 +14,12 @@ struct StemInfo: Identifiable {
     let color: Color
     /// Pre-rendered spectrogram image for this stem (nil until separation completes).
     let spectrogramImage: CGImage?
+    /// Absolute path to the stem's WAV file for drag-and-drop export.
+    let wavPath: String?
+    /// Current gain value from DAW param (0.0–2.0).
+    let gain: Float
+    /// Whether this stem is soloed.
+    let isSoloed: Bool
 }
 
 /// Phase constants matching the C #defines.
@@ -48,6 +54,12 @@ final class ViewState: ObservableObject {
     @Published var clipSampleRate: UInt32 = 44100
     @Published var stems: [StemInfo] = []
     @Published var modelVariant: ModelVariantUI = .standard
+
+    // Preview playback state
+    @Published var previewPlaying: Bool = false
+    @Published var previewPosition: UInt64 = 0
+    @Published var stemNSamples: UInt64 = 0
+    @Published var stemSampleRate: UInt32 = 0
 
     /// Display spectrogram: dB magnitudes, flat [frame × bin] layout.
     @Published var spectrogramMags: [Float] = []
@@ -111,7 +123,13 @@ final class ViewState: ObservableObject {
                         stemR: stemR, stemG: stemG, stemB: stemB
                     )
                 }
-                return StemInfo(id: name, name: name, color: color, spectrogramImage: stemImage)
+                let wavPath = stem.wav_path != nil ? String(cString: stem.wav_path) : nil
+                return StemInfo(
+                    id: name, name: name, color: color,
+                    spectrogramImage: stemImage, wavPath: wavPath,
+                    gain: stem.gain,
+                    isSoloed: stem.is_soloed != 0
+                )
             }
         }
 
@@ -122,6 +140,12 @@ final class ViewState: ObservableObject {
         let clipEnd = state.clip.end_sample
         let clipRate = state.clip.sample_rate
         let variant = ModelVariantUI(rawValue: state.model_variant) ?? .standard
+
+        // Preview state
+        let previewPlaying = state.preview_playing != 0
+        let previewPosition = state.preview_position
+        let stemNSamples = state.stem_n_samples
+        let stemSampleRate = state.stem_sample_rate
 
         // Copy spectrogram data
         let specFrames = state.spectrogram.num_frames
@@ -163,6 +187,10 @@ final class ViewState: ObservableObject {
             self.clipSampleRate = clipRate
             self.stems = stems
             self.modelVariant = variant
+            self.previewPlaying = previewPlaying
+            self.previewPosition = previewPosition
+            self.stemNSamples = stemNSamples
+            self.stemSampleRate = stemSampleRate
             if specChanged {
                 self.spectrogramMags = specMags
                 self.spectrogramFrames = specFrames
@@ -198,5 +226,23 @@ final class ViewState: ObservableObject {
     var clipEndSeconds: Double {
         guard clipSampleRate > 0 else { return 0 }
         return Double(clipEndSample) / Double(clipSampleRate)
+    }
+
+    /// Preview position as a fraction 0–1.
+    var previewFraction: Double {
+        guard stemNSamples > 0 else { return 0 }
+        return min(Double(previewPosition) / Double(stemNSamples), 1.0)
+    }
+
+    /// Current preview time in seconds.
+    var previewTimeSeconds: Double {
+        guard stemSampleRate > 0 else { return 0 }
+        return Double(previewPosition) / Double(stemSampleRate)
+    }
+
+    /// Total stem duration in seconds.
+    var stemDurationSeconds: Double {
+        guard stemSampleRate > 0 else { return 0 }
+        return Double(stemNSamples) / Double(stemSampleRate)
     }
 }

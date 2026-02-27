@@ -44,11 +44,42 @@ struct PlayerLayout: View {
         HStack(spacing: 0) {
             // Main player area
             VStack(alignment: .leading, spacing: 0) {
-                // Spectrogram (260px matching web)
-                SpectrogramImageView(image: viewState.spectrogramImage)
-                    .frame(height: 260)
-                    .padding(.horizontal, Theme.padding)
-                    .padding(.top, 14)
+                // Spectrogram (260px matching web) with playhead overlay
+                ZStack(alignment: .leading) {
+                    SpectrogramImageView(image: viewState.spectrogramImage)
+
+                    // Playhead line (visible when stems exist)
+                    if viewState.phase == .ready && viewState.stemNSamples > 0 {
+                        GeometryReader { geo in
+                            let xPos = geo.size.width * viewState.previewFraction
+                            Rectangle()
+                                .fill(Color.white)
+                                .frame(width: 1.5)
+                                .offset(x: xPos - 0.75)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                }
+                .frame(height: 260)
+                .overlay(
+                    // Invisible geometry reader for click-to-seek
+                    GeometryReader { geo in
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onEnded { value in
+                                        if viewState.phase == .ready && viewState.stemNSamples > 0 {
+                                            let fraction = max(0, min(1, value.location.x / geo.size.width))
+                                            let sample = UInt64(fraction * Double(viewState.stemNSamples))
+                                            callbackHandler.previewSeek(samplePosition: sample)
+                                        }
+                                    }
+                            )
+                    }
+                )
+                .padding(.horizontal, Theme.padding)
+                .padding(.top, 14)
 
                 // Player controls row
                 PlayerControlsRow()
@@ -90,13 +121,25 @@ struct PlayerLayout: View {
     }
 }
 
-/// Player controls row: filename + duration.
+/// Player controls row: filename + duration (non-ready), or play/seek/time (ready).
 struct PlayerControlsRow: View {
     @EnvironmentObject var viewState: ViewState
+    @EnvironmentObject var callbackHandler: CallbackHandler
+
+    @State private var localSeekFraction: Double = 0
+    @State private var isSeeking: Bool = false
 
     var body: some View {
+        if viewState.phase == .ready && viewState.stemNSamples > 0 {
+            readyControls
+        } else {
+            defaultControls
+        }
+    }
+
+    // Default: filename + duration
+    private var defaultControls: some View {
         HStack(spacing: 12) {
-            // Filename
             if !viewState.filename.isEmpty {
                 Text(viewState.filename)
                     .font(.system(size: 12, weight: .medium))
@@ -107,7 +150,6 @@ struct PlayerControlsRow: View {
 
             Spacer()
 
-            // Duration
             if viewState.clipSampleRate > 0 {
                 let duration = Double(viewState.totalSamples) / Double(viewState.clipSampleRate)
                 Text(formatTime(duration))
@@ -115,6 +157,79 @@ struct PlayerControlsRow: View {
                     .foregroundColor(Theme.textDim)
             }
         }
+    }
+
+    // Ready: [filename] [▶/⏸] [0:42] [====seek====] [3:57]
+    private var readyControls: some View {
+        HStack(spacing: 10) {
+            // Filename (compact)
+            if !viewState.filename.isEmpty {
+                Text(viewState.filename)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(Theme.textDim)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 120, alignment: .leading)
+            }
+
+            // Play/Pause button
+            Button(action: { callbackHandler.previewToggle() }) {
+                Image(systemName: viewState.previewPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.text)
+                    .frame(width: 28, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Theme.surface2.opacity(0.5))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Theme.border.opacity(0.3), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+
+            // Current time
+            Text(formatTime(viewState.previewTimeSeconds))
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundColor(Theme.textDim)
+                .frame(width: 36, alignment: .trailing)
+
+            // Seek slider
+            Slider(
+                value: $localSeekFraction,
+                in: 0...1,
+                onEditingChanged: { editing in
+                    isSeeking = editing
+                    if !editing {
+                        seekTo(fraction: localSeekFraction)
+                    }
+                }
+            )
+            .tint(Theme.accentCool)
+            .onChange(of: localSeekFraction) { _ in
+                if isSeeking {
+                    seekTo(fraction: localSeekFraction)
+                }
+            }
+            .onChange(of: viewState.previewFraction) { newValue in
+                if !isSeeking {
+                    localSeekFraction = newValue
+                }
+            }
+            .onAppear { localSeekFraction = viewState.previewFraction }
+
+            // Total duration
+            Text(formatTime(viewState.stemDurationSeconds))
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundColor(Theme.textMicro)
+                .frame(width: 36, alignment: .leading)
+        }
+    }
+
+    private func seekTo(fraction: Double) {
+        let sample = UInt64(fraction * Double(viewState.stemNSamples))
+        callbackHandler.previewSeek(samplePosition: sample)
     }
 }
 

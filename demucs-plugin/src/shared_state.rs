@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use arc_swap::ArcSwap;
 use parking_lot::RwLock;
@@ -50,6 +50,16 @@ pub struct SharedState {
 
     /// Per-stem spectrograms (computed after separation completes).
     pub stem_spectrograms: RwLock<Vec<DisplaySpectrogram>>,
+
+    /// Absolute paths to per-stem WAV files (written after separation).
+    /// One entry per stem, in the same order as `stem_names`.
+    pub stem_wav_paths: RwLock<Vec<String>>,
+
+    /// UI preview: whether the play button is active (toggled by editor).
+    pub preview_playing: AtomicBool,
+
+    /// UI preview: playback position in samples (reset to 0 on play, advanced by audio thread).
+    pub preview_position: AtomicU64,
 }
 
 impl SharedState {
@@ -67,6 +77,9 @@ impl SharedState {
             content_hash: RwLock::new(None),
             spectrogram: RwLock::new(None),
             stem_spectrograms: RwLock::new(Vec::new()),
+            stem_wav_paths: RwLock::new(Vec::new()),
+            preview_playing: AtomicBool::new(false),
+            preview_position: AtomicU64::new(0),
         }
     }
 
