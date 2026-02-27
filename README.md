@@ -14,7 +14,7 @@ Runs as a **native CLI** (Metal on macOS, Vulkan on Linux/Windows), entirely **i
 
 ## Listen
 
-"There Ain't Nothin'" by [HoliznaCC0](https://freemusicarchive.org/music/holiznacc0/orphaned-media/there-aint-nothin) (CC0 — public domain), separated with the standard `htdemucs` model:
+[There Ain't Nothin'" by HoliznaCC0](https://freemusicarchive.org/music/holiznacc0/orphaned-media/there-aint-nothin) (CC0 — public domain), separated with the standard `htdemucs` model:
 | | |
 |---|---|
 | **Original mix** | <video src="https://github.com/user-attachments/assets/90bbbd1c-6235-413a-8dc3-600da5c2c62f" controls preload="none"></video> |
@@ -47,6 +47,10 @@ The plugin runs as a VST3 or CLAP instrument in any DAW on macOS. Drop in an aud
 
 ![Stems ready with mixer](screenshots/plugin-5.png)
 
+**Drag stems directly into your DAW:**
+
+![Drag and drop stems into DAW](screenshots/plugin-drag-drop.gif)
+
 ### How it works
 
 1. **Load audio** — drag a file from your DAW or Finder into the plugin (WAV, AIFF, MP3, FLAC)
@@ -66,14 +70,6 @@ Download `Demucs.vst3` or `Demucs.clap` from the [latest release](https://github
 
 - **VST3:** `~/Library/Audio/Plug-Ins/VST3/`
 - **CLAP:** `~/Library/Audio/Plug-Ins/CLAP/`
-
-Since the plugin is not code-signed, macOS will quarantine it on first launch. Remove the quarantine flag:
-
-```bash
-xattr -cr ~/Library/Audio/Plug-Ins/VST3/Demucs.vst3
-# or
-xattr -cr ~/Library/Audio/Plug-Ins/CLAP/Demucs.clap
-```
 
 ## Web App
 
