@@ -12,6 +12,18 @@ Runs as a **native CLI** (Metal on macOS, Vulkan on Linux/Windows), entirely **i
 
 ![Spectrogram view with model selection](screenshots/02-spectrogram.png)
 
+## Listen
+
+"There Ain't Nothin'" by [HoliznaCC0](https://freemusicarchive.org/music/holiznacc0/orphaned-media/there-aint-nothin) (CC0 — public domain), separated with the standard `htdemucs` model:
+
+| | |
+|---|---|
+| **Original mix** | <video src="https://github.com/nikhilunni/demucs-rs/raw/main/samples/there-aint-nothin.mp4" controls preload="none"></video> |
+| **Drums** | <video src="https://github.com/nikhilunni/demucs-rs/raw/main/samples/drums.mp4" controls preload="none"></video> |
+| **Bass** | <video src="https://github.com/nikhilunni/demucs-rs/raw/main/samples/bass.mp4" controls preload="none"></video> |
+| **Vocals** | <video src="https://github.com/nikhilunni/demucs-rs/raw/main/samples/vocals.mp4" controls preload="none"></video> |
+| **Other** | <video src="https://github.com/nikhilunni/demucs-rs/raw/main/samples/other.mp4" controls preload="none"></video> |
+
 ## Features
 
 - **Three model variants** — Standard (4-stem), 6-Stem (adds guitar & piano), and Fine-Tuned (best quality)
