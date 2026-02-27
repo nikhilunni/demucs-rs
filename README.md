@@ -15,14 +15,13 @@ Runs as a **native CLI** (Metal on macOS, Vulkan on Linux/Windows), entirely **i
 ## Listen
 
 "There Ain't Nothin'" by [HoliznaCC0](https://freemusicarchive.org/music/holiznacc0/orphaned-media/there-aint-nothin) (CC0 — public domain), separated with the standard `htdemucs` model:
-
 | | |
 |---|---|
-| **Original mix** | <video src="https://github.com/nikhilunni/demucs-rs/raw/main/samples/there-aint-nothin.mp4" controls preload="none"></video> |
-| **Drums** | <video src="https://github.com/nikhilunni/demucs-rs/raw/main/samples/drums.mp4" controls preload="none"></video> |
-| **Bass** | <video src="https://github.com/nikhilunni/demucs-rs/raw/main/samples/bass.mp4" controls preload="none"></video> |
-| **Vocals** | <video src="https://github.com/nikhilunni/demucs-rs/raw/main/samples/vocals.mp4" controls preload="none"></video> |
-| **Other** | <video src="https://github.com/nikhilunni/demucs-rs/raw/main/samples/other.mp4" controls preload="none"></video> |
+| **Original mix** | <video src="https://github.com/user-attachments/assets/90bbbd1c-6235-413a-8dc3-600da5c2c62f" controls preload="none"></video> |
+| **Drums** | <video src="https://github.com/user-attachments/assets/665067b0-81ff-4711-b7f1-17578a0cda5e" controls preload="none"></video> |
+| **Bass** | <video src="https://github.com/user-attachments/assets/a16223a1-423f-4067-b242-37ce25fb01b4" controls preload="none"></video> |
+| **Vocals** | <video src="https://github.com/user-attachments/assets/4ceda21b-e04e-41ef-bbaa-833ce1d2081e" controls preload="none"></video> |
+| **Other** | <video src="https://github.com/user-attachments/assets/7897081a-cdb1-4a60-b6bb-018dc39b672a" controls preload="none"></video> |
 
 ## Features
 
