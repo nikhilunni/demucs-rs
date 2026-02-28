@@ -86,6 +86,27 @@ impl StemCache {
         })
     }
 
+    /// Return paths to existing WAV files for drag-and-drop.
+    /// Returns an empty vec if metadata is missing or any WAV file doesn't exist.
+    pub fn wav_paths(&self, key: &str) -> Vec<PathBuf> {
+        let dir = self.stems_dir.join(key);
+        let Ok(meta_bytes) = fs::read(dir.join("metadata.json")) else {
+            return Vec::new();
+        };
+        let Ok(meta) = serde_json::from_slice::<CacheMetadata>(&meta_bytes) else {
+            return Vec::new();
+        };
+        let mut paths = Vec::with_capacity(meta.stem_names.len());
+        for name in &meta.stem_names {
+            let path = dir.join(format!("{name}.wav"));
+            if !path.exists() {
+                return Vec::new();
+            }
+            paths.push(path);
+        }
+        paths
+    }
+
     /// Write stereo f32 WAV files for each stem, returning paths.
     /// Files: `{cache_dir}/{key}/drums.wav`, `bass.wav`, etc.
     pub fn save_wavs(&self, key: &str, buffers: &StemBuffers) -> io::Result<Vec<PathBuf>> {

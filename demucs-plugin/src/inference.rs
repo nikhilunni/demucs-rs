@@ -503,23 +503,35 @@ fn handle_restore_from_cache(
 
     match stem_cache.load(key) {
         Ok(buffers) => {
-            compute_stem_spectrograms(shared, &buffers);
+            // Fast path: make audio playable ASAP.
+            shared.stem_buffers.store(Arc::new(Some(buffers)));
+            *shared.cache_key.write() = Some(key.to_string());
+            shared.set_progress(1.0);
 
-            // Ensure WAV files exist for drag-and-drop
-            match stem_cache.save_wavs(key, &buffers) {
-                Ok(paths) => {
-                    *shared.stem_wav_paths.write() = paths
-                        .iter()
-                        .map(|p| p.to_string_lossy().to_string())
-                        .collect();
+            // Restore clip selection from persisted params
+            if let Some(json) = persisted_clip_json {
+                if let Ok(clip) = serde_json::from_str::<ClipSelection>(json) {
+                    *shared.clip.write() = clip;
                 }
-                Err(e) => log::warn!("Failed to write WAV files: {e}"),
             }
 
-            // Restore content hash (needed for re-separation)
+            // Restore content hash (fast — small file)
             if let Ok(Some(hash)) = stem_cache.load_content_hash(key) {
                 *shared.content_hash.write() = Some(hash);
             }
+
+            // WAV paths for drag-and-drop (just checks existence, no I/O)
+            let wav_paths = stem_cache.wav_paths(key);
+            if !wav_paths.is_empty() {
+                *shared.stem_wav_paths.write() = wav_paths
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect();
+            }
+
+            *shared.phase.write() = PluginPhase::Ready;
+
+            // --- Visual restore (audio is already playing) ---
 
             // Restore source audio + main spectrogram
             match stem_cache.load_source(key) {
@@ -530,7 +542,9 @@ fn handle_restore_from_cache(
                         .zip(&source.right)
                         .map(|(l, r)| (l + r) * 0.5)
                         .collect();
-                    if let Ok(data) = demucs_core::dsp::spectrogram::compute_spectrogram(&mono) {
+                    if let Ok(data) =
+                        demucs_core::dsp::spectrogram::compute_spectrogram(&mono)
+                    {
                         *shared.spectrogram.write() = Some(DisplaySpectrogram {
                             mags: data.mags,
                             num_frames: data.num_frames,
@@ -538,12 +552,6 @@ fn handle_restore_from_cache(
                             sample_rate: source.sample_rate,
                         });
                     }
-                    // Restore clip selection from persisted params or default to full
-                    let clip = persisted_clip_json
-                        .and_then(|json| serde_json::from_str::<ClipSelection>(json).ok());
-                    *shared.clip.write() = clip.unwrap_or_else(|| {
-                        ClipSelection::full(source.left.len() as u64, source.sample_rate)
-                    });
                     *shared.source_audio.write() = Some(source);
                 }
                 Ok(None) => {
@@ -554,10 +562,11 @@ fn handle_restore_from_cache(
                 }
             }
 
-            shared.stem_buffers.store(Arc::new(Some(buffers)));
-            *shared.cache_key.write() = Some(key.to_string());
-            shared.set_progress(1.0);
-            *shared.phase.write() = PluginPhase::Ready;
+            // Stem spectrograms
+            let guard = shared.stem_buffers.load();
+            if let Some(ref buffers) = **guard {
+                compute_stem_spectrograms(shared, buffers);
+            }
         }
         Err(e) => {
             log::warn!("Failed to restore cached stems: {e}");

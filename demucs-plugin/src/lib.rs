@@ -165,6 +165,7 @@ impl Plugin for DemucsPlugin {
             .store(self.notes_held > 0, Ordering::Relaxed);
 
         // 2. Determine playback source.
+        let daw_sr = self.shared.daw_sample_rate.load(Ordering::Relaxed);
         let transport = context.transport();
 
         // Publish DAW transport state for the GUI.
@@ -198,17 +199,17 @@ impl Plugin for DemucsPlugin {
             // UI preview: use internal position counter.
             let pos = self.shared.preview_position.load(Ordering::Relaxed) as usize;
             let new_pos = pos + buffer.samples();
-            // Auto-stop at end of stems
+            // Auto-stop at end of stems (convert stem duration to DAW samples)
             let guard = self.shared.stem_buffers.load();
-            let n_samples = match guard.as_ref() {
-                Some(b) => b.n_samples,
+            let daw_end = match guard.as_ref() {
+                Some(b) => audio::daw_duration(b.n_samples, b.sample_rate, daw_sr),
                 None => 0,
             };
-            if n_samples > 0 && new_pos >= n_samples {
+            if daw_end > 0 && new_pos >= daw_end {
                 self.shared.preview_playing.store(false, Ordering::Relaxed);
                 self.shared
                     .preview_position
-                    .store(n_samples as u64, Ordering::Relaxed);
+                    .store(daw_end as u64, Ordering::Relaxed);
             } else {
                 self.shared
                     .preview_position
@@ -235,6 +236,7 @@ impl Plugin for DemucsPlugin {
             &self.shared.stem_buffers,
             &self.params,
             playback_pos,
+            daw_sr,
         )
     }
 }

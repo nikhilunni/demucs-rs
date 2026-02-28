@@ -218,8 +218,10 @@ unsafe extern "C" fn cb_preview_toggle(ctx: *mut c_void) {
         // If at end of track, reset to beginning before playing
         let guard = context.shared.stem_buffers.load();
         if let Some(buffers) = guard.as_ref() {
+            let daw_sr = context.shared.daw_sample_rate.load(Ordering::Relaxed);
+            let daw_end = crate::audio::daw_duration(buffers.n_samples, buffers.sample_rate, daw_sr);
             let pos = context.shared.preview_position.load(Ordering::Relaxed) as usize;
-            if pos >= buffers.n_samples {
+            if pos >= daw_end {
                 context.shared.preview_position.store(0, Ordering::Relaxed);
             }
         }
@@ -232,6 +234,10 @@ unsafe extern "C" fn cb_preview_toggle(ctx: *mut c_void) {
 
 unsafe extern "C" fn cb_preview_seek(ctx: *mut c_void, sample_position: u64) {
     let context = &*(ctx as *const CallbackContext);
+    // Ignore seek when DAW transport is driving the playhead.
+    if context.shared.daw_playing.load(Ordering::Relaxed) {
+        return;
+    }
     context
         .shared
         .preview_position
@@ -606,13 +612,13 @@ fn build_ui_state(
         preview_playing: shared.preview_playing.load(Ordering::Relaxed) as u32,
         preview_position: shared.preview_position.load(Ordering::Relaxed),
         stem_n_samples: match guard.as_ref() {
-            Some(b) => b.n_samples as u64,
+            Some(b) => {
+                let daw_sr = shared.daw_sample_rate.load(Ordering::Relaxed);
+                crate::audio::daw_duration(b.n_samples, b.sample_rate, daw_sr) as u64
+            }
             None => 0,
         },
-        stem_sample_rate: match guard.as_ref() {
-            Some(b) => b.sample_rate,
-            None => 0,
-        },
+        stem_sample_rate: shared.daw_sample_rate.load(Ordering::Relaxed),
         midi_active: shared.midi_active.load(Ordering::Relaxed) as u32,
         midi_position: shared.midi_position.load(Ordering::Relaxed),
         daw_playing: shared.daw_playing.load(Ordering::Relaxed) as u32,
