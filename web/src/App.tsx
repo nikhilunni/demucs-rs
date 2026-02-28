@@ -222,7 +222,7 @@ export default function App() {
         urls.push(wavUrl);
 
         stems.push({ name: names[i], image, url: wavUrl });
-        tracks.push({ name: names[i], url: wavUrl });
+        tracks.push({ name: names[i], left: stemLeft, right: stemRight, sampleRate: trackInfo.sampleRate });
       }
 
       stemUrlsRef.current = urls;

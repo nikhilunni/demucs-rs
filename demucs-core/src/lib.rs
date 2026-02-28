@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::dsp::cac::{cac_data_to_complex, stft_to_cac};
 use crate::dsp::resample::resample_channel;
 use crate::dsp::stft::Stft;
@@ -70,17 +72,17 @@ impl<B: Backend> Demucs<B> {
 
         // ── 0. Resample to 44100 Hz if needed ────────────────────────────────
         let needs_resample = sample_rate != SAMPLE_RATE as u32;
-        let (left_in, right_in) = if needs_resample {
+        let (left_in, right_in): (Cow<[f32]>, Cow<[f32]>) = if needs_resample {
             let l = resample_channel(left_channel, sample_rate, SAMPLE_RATE as u32)
                 .map_err(DemucsError::Dsp)?;
             let r = resample_channel(right_channel, sample_rate, SAMPLE_RATE as u32)
                 .map_err(DemucsError::Dsp)?;
-            (l, r)
+            (Cow::Owned(l), Cow::Owned(r))
         } else {
-            (left_channel.to_vec(), right_channel.to_vec())
+            (Cow::Borrowed(left_channel), Cow::Borrowed(right_channel))
         };
-        let left_channel = &left_in;
-        let right_channel = &right_in;
+        let left_channel = &*left_in;
+        let right_channel = &*right_in;
         let n_samples = left_channel.len();
 
         // ── 1. Short audio fast path (≤ TRAINING_LENGTH) ────────────────────

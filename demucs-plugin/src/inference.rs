@@ -38,6 +38,13 @@ pub enum InferenceCommand {
         clip: ClipSelection,
     },
 
+    /// Restore stems from disk cache (deferred from process() to avoid audio-thread I/O).
+    RestoreFromCache {
+        cache_key: String,
+        persisted_clip_json: Option<String>,
+        persisted_source_path: Option<String>,
+    },
+
     /// Cancel the current operation.
     Cancel,
 
@@ -105,6 +112,18 @@ fn inference_loop(shared: Arc<SharedState>, cmd_rx: Receiver<InferenceCommand>) 
                 clip,
             } => {
                 handle_separate(&shared, model_variant, clip, &mut cached_model);
+            }
+            InferenceCommand::RestoreFromCache {
+                cache_key,
+                persisted_clip_json,
+                persisted_source_path,
+            } => {
+                handle_restore_from_cache(
+                    &shared,
+                    &cache_key,
+                    persisted_clip_json.as_deref(),
+                    persisted_source_path.as_deref(),
+                );
             }
             InferenceCommand::Cancel => {
                 shared.cancel_requested.store(true, Ordering::Relaxed);
@@ -455,6 +474,95 @@ pub fn compute_stem_spectrograms(shared: &SharedState, buffers: &crate::shared_s
         }
     }
     *shared.stem_spectrograms.write() = stem_specs;
+}
+
+fn handle_restore_from_cache(
+    shared: &SharedState,
+    key: &str,
+    persisted_clip_json: Option<&str>,
+    persisted_source_path: Option<&str>,
+) {
+    let stem_cache = match StemCache::new() {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("Failed to init stem cache: {e}");
+            return;
+        }
+    };
+
+    if !stem_cache.is_cached(key) {
+        // Cache miss — show a helpful message
+        if let Some(path) = persisted_source_path {
+            set_error(
+                shared,
+                format!("Cached stems not found. Drop '{}' and re-run separation.", path),
+            );
+        }
+        return;
+    }
+
+    match stem_cache.load(key) {
+        Ok(buffers) => {
+            compute_stem_spectrograms(shared, &buffers);
+
+            // Ensure WAV files exist for drag-and-drop
+            match stem_cache.save_wavs(key, &buffers) {
+                Ok(paths) => {
+                    *shared.stem_wav_paths.write() = paths
+                        .iter()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .collect();
+                }
+                Err(e) => log::warn!("Failed to write WAV files: {e}"),
+            }
+
+            // Restore content hash (needed for re-separation)
+            if let Ok(Some(hash)) = stem_cache.load_content_hash(key) {
+                *shared.content_hash.write() = Some(hash);
+            }
+
+            // Restore source audio + main spectrogram
+            match stem_cache.load_source(key) {
+                Ok(Some(source)) => {
+                    let mono: Vec<f32> = source
+                        .left
+                        .iter()
+                        .zip(&source.right)
+                        .map(|(l, r)| (l + r) * 0.5)
+                        .collect();
+                    if let Ok(data) = demucs_core::dsp::spectrogram::compute_spectrogram(&mono) {
+                        *shared.spectrogram.write() = Some(DisplaySpectrogram {
+                            mags: data.mags,
+                            num_frames: data.num_frames,
+                            num_bins: data.num_bins,
+                            sample_rate: source.sample_rate,
+                        });
+                    }
+                    // Restore clip selection from persisted params or default to full
+                    let clip = persisted_clip_json
+                        .and_then(|json| serde_json::from_str::<ClipSelection>(json).ok());
+                    *shared.clip.write() = clip.unwrap_or_else(|| {
+                        ClipSelection::full(source.left.len() as u64, source.sample_rate)
+                    });
+                    *shared.source_audio.write() = Some(source);
+                }
+                Ok(None) => {
+                    log::info!("No cached source audio (old cache format)");
+                }
+                Err(e) => {
+                    log::warn!("Failed to restore source audio: {e}");
+                }
+            }
+
+            shared.stem_buffers.store(Arc::new(Some(buffers)));
+            *shared.cache_key.write() = Some(key.to_string());
+            shared.set_progress(1.0);
+            *shared.phase.write() = PluginPhase::Ready;
+        }
+        Err(e) => {
+            log::warn!("Failed to restore cached stems: {e}");
+        }
+    }
 }
 
 fn set_error(shared: &SharedState, message: String) {

@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface StemTrack {
   name: string;
-  url: string; // blob URL from encodeWavUrl
+  left: Float32Array;
+  right: Float32Array;
+  sampleRate: number;
 }
 
 export interface MultiTrackPlayer {
@@ -145,15 +147,13 @@ export function useMultiTrackPlayer(
     (async () => {
       const initialMuted: Record<string, boolean> = {};
 
-      // Decode all tracks in parallel
-      const decoded = await Promise.all(
-        tracks.map(async (track) => {
-          const resp = await fetch(track.url);
-          const arrayBuf = await resp.arrayBuffer();
-          const audioBuf = await ctx.decodeAudioData(arrayBuf);
-          return { name: track.name, buffer: audioBuf };
-        }),
-      );
+      // Create AudioBuffers directly from PCM data (no WAV encode→decode round-trip)
+      const decoded = tracks.map((track) => {
+        const buffer = ctx.createBuffer(2, track.left.length, track.sampleRate);
+        buffer.copyToChannel(track.left, 0);
+        buffer.copyToChannel(track.right, 1);
+        return { name: track.name, buffer };
+      });
 
       if (cancelled) return;
 
