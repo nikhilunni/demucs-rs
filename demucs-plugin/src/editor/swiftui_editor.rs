@@ -219,7 +219,8 @@ unsafe extern "C" fn cb_preview_toggle(ctx: *mut c_void) {
         let guard = context.shared.stem_buffers.load();
         if let Some(buffers) = guard.as_ref() {
             let daw_sr = context.shared.daw_sample_rate.load(Ordering::Relaxed);
-            let daw_end = crate::audio::daw_duration(buffers.n_samples, buffers.sample_rate, daw_sr);
+            let daw_end =
+                crate::audio::daw_duration(buffers.n_samples, buffers.sample_rate, daw_sr);
             let pos = context.shared.preview_position.load(Ordering::Relaxed) as usize;
             if pos >= daw_end {
                 context.shared.preview_position.store(0, Ordering::Relaxed);

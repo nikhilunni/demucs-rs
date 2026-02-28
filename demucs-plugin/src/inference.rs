@@ -507,8 +507,11 @@ fn handle_restore_from_cache(
             // Restore source audio + main spectrogram
             match stem_cache.load_source(key) {
                 Ok(Some(source)) => {
-                    *shared.spectrogram.write() =
-                        compute_display_spectrogram(&source.left, &source.right, source.sample_rate);
+                    *shared.spectrogram.write() = compute_display_spectrogram(
+                        &source.left,
+                        &source.right,
+                        source.sample_rate,
+                    );
                     *shared.source_audio.write() = Some(source);
                 }
                 Ok(None) => {
@@ -529,7 +532,10 @@ fn handle_restore_from_cache(
             if let Some(path) = persisted_source_path {
                 set_error(
                     shared,
-                    format!("Cached stems not found. Drop '{}' and re-run separation.", path),
+                    format!(
+                        "Cached stems not found. Drop '{}' and re-run separation.",
+                        path
+                    ),
                 );
             } else {
                 log::warn!("Failed to restore cached stems: {e}");

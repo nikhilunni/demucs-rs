@@ -64,7 +64,7 @@ pub fn serve_stems(
     // Main output: weighted sum of all stems.
     // Incrementally advance stem position to avoid a multiply per frame.
     let mut stem_pos_f = playback_pos as f64 * rate_ratio;
-    for (_, mut frame) in buffer.iter_samples().enumerate() {
+    for mut frame in buffer.iter_samples() {
         let idx = stem_pos_f as usize;
         let frac = (stem_pos_f - idx as f64) as f32;
 
@@ -136,7 +136,7 @@ fn write_stem_to_buffer(
     rate_ratio: f64,
 ) {
     let mut stem_pos_f = playback_pos as f64 * rate_ratio;
-    for (_, mut frame) in buffer.iter_samples().enumerate() {
+    for mut frame in buffer.iter_samples() {
         let idx = stem_pos_f as usize;
         let frac = (stem_pos_f - idx as f64) as f32;
 

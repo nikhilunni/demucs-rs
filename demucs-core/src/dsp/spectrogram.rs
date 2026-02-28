@@ -5,7 +5,7 @@
 //! for rendering magma-colormap spectrograms.
 
 use super::stft::Stft;
-use crate::{HOP_LENGTH, N_FFT, Result};
+use crate::{Result, HOP_LENGTH, N_FFT};
 
 /// Result of computing a display spectrogram.
 pub struct SpectrogramData {
