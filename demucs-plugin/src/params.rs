@@ -81,7 +81,7 @@ impl DemucsParams {
             3 => &self.stem_vocals,
             4 => &self.stem_guitar,
             5 => &self.stem_piano,
-            _ => &self.stem_drums, // fallback
+            _ => panic!("stem index {index} out of range (expected 0..=5)"),
         }
     }
 }

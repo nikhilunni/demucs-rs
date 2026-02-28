@@ -78,6 +78,30 @@ fn ensure_panic_hook() {
     });
 }
 
+/// Initialize WebGPU runtime exactly once, returning the device.
+async fn ensure_wgpu() -> WgpuDevice {
+    let device = WgpuDevice::default();
+    if !WGPU_INITIALIZED.load(Ordering::SeqCst) {
+        let options = RuntimeOptions {
+            tasks_max: 128,
+            ..Default::default()
+        };
+        init_setup_async::<WebGpu>(&device, options).await;
+        WGPU_INITIALIZED.store(true, Ordering::SeqCst);
+    }
+    device
+}
+
+/// Map a model ID string to ModelOptions.
+fn parse_model_opts(model_id: &str, stems: Vec<StemId>) -> Result<ModelOptions, JsError> {
+    match model_id {
+        HTDEMUCS_ID => Ok(ModelOptions::FourStem),
+        HTDEMUCS_6S_ID => Ok(ModelOptions::SixStem),
+        HTDEMUCS_FT_ID => Ok(ModelOptions::FineTuned(stems)),
+        _ => Err(JsError::new(&format!("Unknown model: {}", model_id))),
+    }
+}
+
 // ─── Spectrogram API ────────────────────────────────────────────────────────
 
 /// Result of computing a spectrogram from audio samples.
@@ -222,31 +246,12 @@ pub fn validate_model_weights(bytes: &[u8], model_id: &str) -> Result<JsValue, J
 pub async fn warmup_model(model_bytes: &[u8], model_id: &str) -> Result<(), JsError> {
     ensure_panic_hook();
 
-    // Initialize WebGPU (same as separate)
-    let device = WgpuDevice::default();
-    if !WGPU_INITIALIZED.load(Ordering::SeqCst) {
-        let options = RuntimeOptions {
-            tasks_max: 128,
-            ..Default::default()
-        };
-        init_setup_async::<WebGpu>(&device, options).await;
-        WGPU_INITIALIZED.store(true, Ordering::SeqCst);
-    }
-
-    let opts = match model_id {
-        HTDEMUCS_ID => ModelOptions::FourStem,
-        HTDEMUCS_6S_ID => ModelOptions::SixStem,
-        HTDEMUCS_FT_ID => {
-            // For warmup, just use default 4 stems — we only need to trigger shaders
-            ModelOptions::FineTuned(vec![
-                StemId::Drums,
-                StemId::Bass,
-                StemId::Other,
-                StemId::Vocals,
-            ])
-        }
-        _ => return Err(JsError::new(&format!("Unknown model: {}", model_id))),
-    };
+    let device = ensure_wgpu().await;
+    // For warmup, just use default 4 stems — we only need to trigger shaders
+    let opts = parse_model_opts(
+        model_id,
+        vec![StemId::Drums, StemId::Bass, StemId::Other, StemId::Vocals],
+    )?;
     let model = Demucs::<B>::from_bytes(opts, model_bytes, device)
         .map_err(|e| JsError::new(&format!("Warmup model load failed: {}", e)))?;
 
@@ -315,26 +320,10 @@ pub async fn separate(
     let stem_strs: Vec<String> = serde_wasm_bindgen::from_value(selected_stems)
         .map_err(|e| JsError::new(&format!("Invalid stems array: {}", e)))?;
 
-    let opts = match model_id {
-        HTDEMUCS_ID => ModelOptions::FourStem,
-        HTDEMUCS_6S_ID => ModelOptions::SixStem,
-        HTDEMUCS_FT_ID => {
-            let stems: Vec<StemId> = stem_strs.iter().filter_map(|s| StemId::parse(s)).collect();
-            ModelOptions::FineTuned(stems)
-        }
-        _ => return Err(JsError::new(&format!("Unknown model: {}", model_id))),
-    };
+    let stems: Vec<StemId> = stem_strs.iter().filter_map(|s| StemId::parse(s)).collect();
+    let opts = parse_model_opts(model_id, stems)?;
 
-    // WebGPU device must be initialized asynchronously on WASM (only once)
-    let device = WgpuDevice::default();
-    if !WGPU_INITIALIZED.load(Ordering::SeqCst) {
-        let options = RuntimeOptions {
-            tasks_max: 128,
-            ..Default::default()
-        };
-        init_setup_async::<WebGpu>(&device, options).await;
-        WGPU_INITIALIZED.store(true, Ordering::SeqCst);
-    }
+    let device = ensure_wgpu().await;
 
     let model = Demucs::<B>::from_bytes(opts, model_bytes, device)
         .map_err(|e| JsError::new(&format!("Failed to load model: {}", e)))?;

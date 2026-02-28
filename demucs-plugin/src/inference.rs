@@ -9,7 +9,9 @@ use crossbeam_channel::Receiver;
 use burn::backend::wgpu::{graphics::AutoGraphicsApi, init_setup, RuntimeOptions};
 use cubecl::config::{autotune::AutotuneConfig, cache::CacheConfig, GlobalConfig};
 
-use demucs_core::model::metadata::{self, ModelInfo, ALL_MODELS, HTDEMUCS_FT_ID};
+use demucs_core::model::metadata::{
+    self, ModelInfo, ALL_MODELS, HTDEMUCS_6S_ID, HTDEMUCS_FT_ID, HTDEMUCS_ID,
+};
 use demucs_core::provider::fs::FsProvider;
 use demucs_core::provider::ModelProvider;
 use demucs_core::{num_chunks, Demucs, ModelOptions};
@@ -461,9 +463,9 @@ fn set_error(shared: &SharedState, message: String) {
 
 fn model_info_for_variant(variant: ModelVariant) -> &'static ModelInfo {
     let id = match variant {
-        ModelVariant::Standard => "htdemucs",
-        ModelVariant::FineTuned => "htdemucs_ft",
-        ModelVariant::SixStem => "htdemucs_6s",
+        ModelVariant::Standard => HTDEMUCS_ID,
+        ModelVariant::FineTuned => HTDEMUCS_FT_ID,
+        ModelVariant::SixStem => HTDEMUCS_6S_ID,
     };
     ALL_MODELS.iter().find(|m| m.id == id).copied().unwrap()
 }

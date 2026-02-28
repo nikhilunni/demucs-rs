@@ -237,7 +237,7 @@ pub fn compute_cache_key(content_hash: &[u8; 32], clip: &ClipSelection, model_id
     hasher.update(model_id.as_bytes());
     let hash = hasher.finalize();
     // First 16 bytes → 32 hex chars. Collision probability negligible.
-    hex::encode(&hash.as_bytes()[..16])
+    hash.to_hex()[..32].to_string()
 }
 
 /// Compute blake3 hash of a file's raw bytes.
@@ -284,16 +284,4 @@ fn write_raw_f32(path: &std::path::Path, samples: &[f32]) -> io::Result<()> {
     let bytes: &[u8] =
         unsafe { std::slice::from_raw_parts(samples.as_ptr() as *const u8, samples.len() * 4) };
     fs::write(path, bytes)
-}
-
-// ─── Hex encoding (avoid adding another dep) ─────────────────────────────
-
-mod hex {
-    pub fn encode(bytes: &[u8]) -> String {
-        let mut s = String::with_capacity(bytes.len() * 2);
-        for &b in bytes {
-            s.push_str(&format!("{b:02x}"));
-        }
-        s
-    }
 }

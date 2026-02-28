@@ -68,9 +68,6 @@ export const colormapStops: readonly [number, number, number, number][] = [
 export const stftParams = {
   nFft: 4096,
   hopLength: 1024,
-  get numBins() {
-    return this.nFft / 2 + 1;
-  },
 } as const;
 
 /* ── Spectrogram display ──────────────────────────────────────── */

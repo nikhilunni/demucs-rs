@@ -54,8 +54,13 @@ export function SpectrogramView({
 
     const rect = wrap.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
+    const w = Math.round(rect.width * dpr);
+    const h = Math.round(rect.height * dpr);
+    // Only resize when dimensions actually change (avoids canvas clear on every ResizeObserver callback)
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
 
     const ctx = canvas.getContext("2d")!;
     ctx.imageSmoothingEnabled = true;

@@ -161,14 +161,19 @@ impl WaveformPeaks {
     /// Compute peaks from stereo audio, downsampled to `num_buckets`.
     pub fn from_audio(left: &[f32], right: &[f32], num_buckets: usize) -> Self {
         let n = left.len();
-        // Mix to mono for display
-        let mono: Vec<f32> = left.iter().zip(right).map(|(l, r)| (l + r) * 0.5).collect();
         let bucket_size = (n / num_buckets.max(1)).max(1);
-        let peaks: Vec<(f32, f32)> = mono
+        // Compute mono min/max directly from stereo pairs, avoiding a full mono Vec allocation.
+        let peaks: Vec<(f32, f32)> = left
             .chunks(bucket_size)
-            .map(|chunk| {
-                let min = chunk.iter().copied().fold(f32::INFINITY, f32::min);
-                let max = chunk.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            .zip(right.chunks(bucket_size))
+            .map(|(l_chunk, r_chunk)| {
+                let mut min = f32::INFINITY;
+                let mut max = f32::NEG_INFINITY;
+                for (&l, &r) in l_chunk.iter().zip(r_chunk) {
+                    let mono = (l + r) * 0.5;
+                    min = min.min(mono);
+                    max = max.max(mono);
+                }
                 (min, max)
             })
             .collect();

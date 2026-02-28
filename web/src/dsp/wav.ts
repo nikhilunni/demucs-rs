@@ -37,12 +37,13 @@ export function encodeWavUrl(
   view.setUint32(40, dataSize, true);
 
   // Interleaved samples: [L0, R0, L1, R1, ...]
-  let offset = headerSize;
+  // Float32Array is ~5-10x faster than DataView.setFloat32 for large buffers.
+  // Note: Float32Array uses platform endianness (little-endian on all modern JS runtimes),
+  // which matches WAV format.
+  const data = new Float32Array(buffer, headerSize, numSamples * numChannels);
   for (let i = 0; i < numSamples; i++) {
-    view.setFloat32(offset, left[i], true);
-    offset += 4;
-    view.setFloat32(offset, right[i], true);
-    offset += 4;
+    data[i * 2] = left[i];
+    data[i * 2 + 1] = right[i];
   }
 
   const blob = new Blob([buffer], { type: "audio/wav" });
