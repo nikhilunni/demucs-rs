@@ -41,7 +41,7 @@ pub enum InferenceCommand {
     /// Restore stems from disk cache (deferred from process() to avoid audio-thread I/O).
     RestoreFromCache {
         cache_key: String,
-        persisted_clip_json: Option<String>,
+        persisted_clip: Option<ClipSelection>,
         persisted_source_path: Option<String>,
     },
 
@@ -115,13 +115,13 @@ fn inference_loop(shared: Arc<SharedState>, cmd_rx: Receiver<InferenceCommand>) 
             }
             InferenceCommand::RestoreFromCache {
                 cache_key,
-                persisted_clip_json,
+                persisted_clip,
                 persisted_source_path,
             } => {
                 handle_restore_from_cache(
                     &shared,
                     &cache_key,
-                    persisted_clip_json.as_deref(),
+                    persisted_clip,
                     persisted_source_path.as_deref(),
                 );
             }
@@ -162,24 +162,7 @@ fn handle_load_audio(shared: &Arc<SharedState>, path: &std::path::Path) {
     let peaks = WaveformPeaks::from_audio(&left, &right, 2000);
 
     // Compute display spectrogram (mono mix → STFT → dB magnitudes)
-    let mono: Vec<f32> = left
-        .iter()
-        .zip(&right)
-        .map(|(l, r)| (l + r) * 0.5)
-        .collect();
-    let spectrogram = match demucs_core::dsp::spectrogram::compute_spectrogram(&mono) {
-        Ok(data) => Some(DisplaySpectrogram {
-            mags: data.mags,
-            num_frames: data.num_frames,
-            num_bins: data.num_bins,
-            sample_rate,
-        }),
-        Err(e) => {
-            log::warn!("Failed to compute spectrogram: {e}");
-            None
-        }
-    };
-    *shared.spectrogram.write() = spectrogram;
+    *shared.spectrogram.write() = compute_display_spectrogram(&left, &right, sample_rate);
 
     // Store source audio
     *shared.source_audio.write() = Some(SourceAudio {
@@ -228,30 +211,24 @@ fn handle_separate(
 
     // Check disk cache
     if let Ok(stem_cache) = StemCache::new() {
-        if stem_cache.is_cached(&cache_key) {
-            match stem_cache.load(&cache_key) {
-                Ok(buffers) => {
-                    // Ensure WAV files exist (write if missing)
-                    match stem_cache.save_wavs(&cache_key, &buffers) {
-                        Ok(paths) => {
-                            *shared.stem_wav_paths.write() = paths
-                                .iter()
-                                .map(|p| p.to_string_lossy().to_string())
-                                .collect();
-                        }
-                        Err(e) => log::warn!("Failed to write WAV files: {e}"),
+        match stem_cache.load(&cache_key) {
+            Ok((buffers, _content_hash)) => {
+                // Ensure WAV files exist (write if missing)
+                match stem_cache.save_wavs(&cache_key, &buffers) {
+                    Ok(paths) => {
+                        *shared.stem_wav_paths.write() = paths_to_strings(&paths);
                     }
-                    compute_stem_spectrograms(shared, &buffers);
-                    shared.stem_buffers.store(Arc::new(Some(buffers)));
-                    *shared.cache_key.write() = Some(cache_key);
-                    shared.set_progress(1.0);
-                    *shared.phase.write() = PluginPhase::Ready;
-                    return;
+                    Err(e) => log::warn!("Failed to write WAV files: {e}"),
                 }
-                Err(e) => {
-                    log::warn!("Failed to load cached stems: {e}");
-                    // Fall through to re-compute
-                }
+                compute_stem_spectrograms(shared, &buffers);
+                shared.stem_buffers.store(Arc::new(Some(buffers)));
+                *shared.cache_key.write() = Some(cache_key);
+                shared.set_progress(1.0);
+                *shared.phase.write() = PluginPhase::Ready;
+                return;
+            }
+            Err(_) => {
+                // Cache miss or corrupt — fall through to re-compute
             }
         }
     }
@@ -414,10 +391,7 @@ fn handle_separate(
                 drop(source_ref);
                 match stem_cache.save_wavs(&cache_key, &buffers) {
                     Ok(paths) => {
-                        *shared.stem_wav_paths.write() = paths
-                            .iter()
-                            .map(|p| p.to_string_lossy().to_string())
-                            .collect();
+                        *shared.stem_wav_paths.write() = paths_to_strings(&paths);
                     }
                     Err(e) => log::warn!("Failed to write WAV files: {e}"),
                 }
@@ -455,31 +429,45 @@ fn handle_separate(
 /// Called after stems are available (fresh inference or cache hit).
 pub fn compute_stem_spectrograms(shared: &SharedState, buffers: &crate::shared_state::StemBuffers) {
     let sample_rate = buffers.sample_rate;
-    let mut stem_specs = Vec::with_capacity(buffers.stems.len());
-    for stem in &buffers.stems {
-        let mono: Vec<f32> = stem
-            .left
-            .iter()
-            .zip(&stem.right)
-            .map(|(l, r)| (l + r) * 0.5)
-            .collect();
-        match demucs_core::dsp::spectrogram::compute_spectrogram(&mono) {
-            Ok(data) => stem_specs.push(DisplaySpectrogram {
-                mags: data.mags,
-                num_frames: data.num_frames,
-                num_bins: data.num_bins,
-                sample_rate,
-            }),
-            Err(e) => log::warn!("Failed to compute stem spectrogram: {e}"),
+    let stem_specs: Vec<_> = buffers
+        .stems
+        .iter()
+        .filter_map(|stem| compute_display_spectrogram(&stem.left, &stem.right, sample_rate))
+        .collect();
+    *shared.stem_spectrograms.write() = stem_specs;
+}
+
+fn compute_display_spectrogram(
+    left: &[f32],
+    right: &[f32],
+    sample_rate: u32,
+) -> Option<DisplaySpectrogram> {
+    let mono: Vec<f32> = left.iter().zip(right).map(|(l, r)| (l + r) * 0.5).collect();
+    match demucs_core::dsp::spectrogram::compute_spectrogram(&mono) {
+        Ok(data) => Some(DisplaySpectrogram {
+            mags: data.mags,
+            num_frames: data.num_frames,
+            num_bins: data.num_bins,
+            sample_rate,
+        }),
+        Err(e) => {
+            log::warn!("Failed to compute spectrogram: {e}");
+            None
         }
     }
-    *shared.stem_spectrograms.write() = stem_specs;
+}
+
+fn paths_to_strings(paths: &[PathBuf]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect()
 }
 
 fn handle_restore_from_cache(
     shared: &SharedState,
     key: &str,
-    persisted_clip_json: Option<&str>,
+    persisted_clip: Option<ClipSelection>,
     persisted_source_path: Option<&str>,
 ) {
     let stem_cache = match StemCache::new() {
@@ -490,44 +478,27 @@ fn handle_restore_from_cache(
         }
     };
 
-    if !stem_cache.is_cached(key) {
-        // Cache miss — show a helpful message
-        if let Some(path) = persisted_source_path {
-            set_error(
-                shared,
-                format!("Cached stems not found. Drop '{}' and re-run separation.", path),
-            );
-        }
-        return;
-    }
-
     match stem_cache.load(key) {
-        Ok(buffers) => {
+        Ok((buffers, content_hash)) => {
             // Fast path: make audio playable ASAP.
+            let stem_names = buffers.stem_names.clone();
             shared.stem_buffers.store(Arc::new(Some(buffers)));
             *shared.cache_key.write() = Some(key.to_string());
             shared.set_progress(1.0);
 
             // Restore clip selection from persisted params
-            if let Some(json) = persisted_clip_json {
-                if let Ok(clip) = serde_json::from_str::<ClipSelection>(json) {
-                    *shared.clip.write() = clip;
-                }
+            if let Some(clip) = persisted_clip {
+                *shared.clip.write() = clip;
             }
 
-            // Restore content hash (fast — small file)
-            if let Ok(Some(hash)) = stem_cache.load_content_hash(key) {
+            // Restore content hash (returned by load, no extra I/O)
+            if let Some(hash) = content_hash {
                 *shared.content_hash.write() = Some(hash);
             }
 
-            // WAV paths for drag-and-drop (just checks existence, no I/O)
-            let wav_paths = stem_cache.wav_paths(key);
-            if !wav_paths.is_empty() {
-                *shared.stem_wav_paths.write() = wav_paths
-                    .iter()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .collect();
-            }
+            // WAV paths for drag-and-drop (no disk I/O)
+            *shared.stem_wav_paths.write() =
+                paths_to_strings(&stem_cache.wav_paths_for(key, &stem_names));
 
             *shared.phase.write() = PluginPhase::Ready;
 
@@ -536,22 +507,8 @@ fn handle_restore_from_cache(
             // Restore source audio + main spectrogram
             match stem_cache.load_source(key) {
                 Ok(Some(source)) => {
-                    let mono: Vec<f32> = source
-                        .left
-                        .iter()
-                        .zip(&source.right)
-                        .map(|(l, r)| (l + r) * 0.5)
-                        .collect();
-                    if let Ok(data) =
-                        demucs_core::dsp::spectrogram::compute_spectrogram(&mono)
-                    {
-                        *shared.spectrogram.write() = Some(DisplaySpectrogram {
-                            mags: data.mags,
-                            num_frames: data.num_frames,
-                            num_bins: data.num_bins,
-                            sample_rate: source.sample_rate,
-                        });
-                    }
+                    *shared.spectrogram.write() =
+                        compute_display_spectrogram(&source.left, &source.right, source.sample_rate);
                     *shared.source_audio.write() = Some(source);
                 }
                 Ok(None) => {
@@ -569,7 +526,14 @@ fn handle_restore_from_cache(
             }
         }
         Err(e) => {
-            log::warn!("Failed to restore cached stems: {e}");
+            if let Some(path) = persisted_source_path {
+                set_error(
+                    shared,
+                    format!("Cached stems not found. Drop '{}' and re-run separation.", path),
+                );
+            } else {
+                log::warn!("Failed to restore cached stems: {e}");
+            }
         }
     }
 }

@@ -58,18 +58,14 @@ impl StemCache {
         Ok(Self { stems_dir })
     }
 
-    /// Check if stems for the given cache key exist on disk.
-    pub fn is_cached(&self, key: &str) -> bool {
-        let dir = self.stems_dir.join(key);
-        dir.join("metadata.json").exists()
-    }
-
-    /// Load cached stems from disk.
-    pub fn load(&self, key: &str) -> io::Result<StemBuffers> {
+    /// Load cached stems from disk. Also returns the content hash if stored.
+    pub fn load(&self, key: &str) -> io::Result<(StemBuffers, Option<[u8; 32]>)> {
         let dir = self.stems_dir.join(key);
         let meta_bytes = fs::read(dir.join("metadata.json"))?;
         let meta: CacheMetadata = serde_json::from_slice(&meta_bytes)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        let content_hash = meta.content_hash.and_then(|v| v.try_into().ok());
 
         let mut stems = Vec::with_capacity(meta.stem_names.len());
         for name in &meta.stem_names {
@@ -78,33 +74,24 @@ impl StemCache {
             stems.push(StemChannel { left, right });
         }
 
-        Ok(StemBuffers {
-            stems,
-            sample_rate: meta.sample_rate,
-            n_samples: meta.n_samples,
-            stem_names: meta.stem_names,
-        })
+        Ok((
+            StemBuffers {
+                stems,
+                sample_rate: meta.sample_rate,
+                n_samples: meta.n_samples,
+                stem_names: meta.stem_names,
+            },
+            content_hash,
+        ))
     }
 
-    /// Return paths to existing WAV files for drag-and-drop.
-    /// Returns an empty vec if metadata is missing or any WAV file doesn't exist.
-    pub fn wav_paths(&self, key: &str) -> Vec<PathBuf> {
+    /// Build WAV file paths from known stem names (no disk I/O).
+    pub fn wav_paths_for(&self, key: &str, stem_names: &[String]) -> Vec<PathBuf> {
         let dir = self.stems_dir.join(key);
-        let Ok(meta_bytes) = fs::read(dir.join("metadata.json")) else {
-            return Vec::new();
-        };
-        let Ok(meta) = serde_json::from_slice::<CacheMetadata>(&meta_bytes) else {
-            return Vec::new();
-        };
-        let mut paths = Vec::with_capacity(meta.stem_names.len());
-        for name in &meta.stem_names {
-            let path = dir.join(format!("{name}.wav"));
-            if !path.exists() {
-                return Vec::new();
-            }
-            paths.push(path);
-        }
-        paths
+        stem_names
+            .iter()
+            .map(|name| dir.join(format!("{name}.wav")))
+            .collect()
     }
 
     /// Write stereo f32 WAV files for each stem, returning paths.
@@ -145,23 +132,6 @@ impl StemCache {
         write_raw_f32(&dir.join("source_left.raw"), &source.left)?;
         write_raw_f32(&dir.join("source_right.raw"), &source.right)?;
         Ok(())
-    }
-
-    /// Load the content hash from cached metadata.
-    pub fn load_content_hash(&self, key: &str) -> io::Result<Option<[u8; 32]>> {
-        let dir = self.stems_dir.join(key);
-        let meta_bytes = fs::read(dir.join("metadata.json"))?;
-        let meta: CacheMetadata = serde_json::from_slice(&meta_bytes)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        Ok(meta.content_hash.and_then(|v| {
-            if v.len() == 32 {
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&v);
-                Some(arr)
-            } else {
-                None
-            }
-        }))
     }
 
     /// Load cached source audio from disk.

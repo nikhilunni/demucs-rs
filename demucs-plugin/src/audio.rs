@@ -62,8 +62,9 @@ pub fn serve_stems(
     }
 
     // Main output: weighted sum of all stems.
-    for (frame_idx, mut frame) in buffer.iter_samples().enumerate() {
-        let stem_pos_f = (playback_pos + frame_idx) as f64 * rate_ratio;
+    // Incrementally advance stem position to avoid a multiply per frame.
+    let mut stem_pos_f = playback_pos as f64 * rate_ratio;
+    for (_, mut frame) in buffer.iter_samples().enumerate() {
         let idx = stem_pos_f as usize;
         let frac = (stem_pos_f - idx as f64) as f32;
 
@@ -86,6 +87,7 @@ pub fn serve_stems(
         if let Some(out) = frame.get_mut(1) {
             *out = r;
         }
+        stem_pos_f += rate_ratio;
     }
 
     // Aux outputs: raw individual stems (no mixer).
@@ -133,8 +135,8 @@ fn write_stem_to_buffer(
     n_stem_samples: usize,
     rate_ratio: f64,
 ) {
-    for (frame_idx, mut frame) in buffer.iter_samples().enumerate() {
-        let stem_pos_f = (playback_pos + frame_idx) as f64 * rate_ratio;
+    let mut stem_pos_f = playback_pos as f64 * rate_ratio;
+    for (_, mut frame) in buffer.iter_samples().enumerate() {
         let idx = stem_pos_f as usize;
         let frac = (stem_pos_f - idx as f64) as f32;
 
@@ -157,6 +159,7 @@ fn write_stem_to_buffer(
                 *s = 0.0;
             }
         }
+        stem_pos_f += rate_ratio;
     }
 }
 

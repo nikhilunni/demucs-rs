@@ -284,9 +284,16 @@ impl DemucsPlugin {
         let cache_key = self.params.persisted_cache_key.read().clone();
         let Some(key) = cache_key else { return };
 
+        let persisted_clip = self
+            .params
+            .persisted_clip
+            .read()
+            .as_deref()
+            .and_then(|json| serde_json::from_str(json).ok());
+
         let _ = self.cmd_tx.send(InferenceCommand::RestoreFromCache {
             cache_key: key,
-            persisted_clip_json: self.params.persisted_clip.read().clone(),
+            persisted_clip,
             persisted_source_path: self.params.persisted_source_path.read().clone(),
         });
     }
