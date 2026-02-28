@@ -50,8 +50,27 @@ jobs:
       - name: Run tests
         run: cargo test -p demucs-core
 
+  plugin-tests:
+    name: Plugin Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: plugin-${{ matrix.os }}
+
+      - name: Run plugin tests
+        run: cargo test -p demucs-plugin
+
   web-check:
-    name: Web / TypeScript Check
+    name: Web / TypeScript Check + Smoke Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,8 +97,25 @@ jobs:
       - name: Build WASM (debug)
         run: wasm-pack build demucs-wasm --target web --out-dir ../web/src/wasm
 
+      - name: Install dependencies
+        working-directory: web
+        run: pnpm install
+
       - name: TypeScript check
         working-directory: web
-        run: |
-          pnpm install
-          pnpm exec tsc --noEmit
+        run: pnpm exec tsc --noEmit
+
+      - name: Build production bundle
+        working-directory: web
+        run: pnpm exec vite build
+
+      - name: Download test audio (CC0 — HoliznaCC0 "There Ain't Nothin")
+        run: curl -fSL -o web/e2e/fixtures/test-audio.mp3 https://freemusicarchive.org/track/there-aint-nothin/stream/
+
+      - name: Install Playwright browsers
+        working-directory: web
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run Playwright smoke tests
+        working-directory: web
+        run: pnpm exec playwright test --config e2e/playwright.config.ts --grep @smoke

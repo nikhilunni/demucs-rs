@@ -6,13 +6,17 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "e2e": "playwright test --config e2e/playwright.config.ts",
+    "e2e:headed": "playwright test --config e2e/playwright.config.ts --headed",
+    "e2e:setup": "curl -fSL -o e2e/fixtures/test-audio.mp3 https://freemusicarchive.org/track/there-aint-nothin/stream/ && npx playwright install chromium"
   },
   "dependencies": {
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",

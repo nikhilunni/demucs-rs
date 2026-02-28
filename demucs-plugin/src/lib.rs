@@ -144,15 +144,10 @@ impl Plugin for DemucsPlugin {
 
         // 1. Drain MIDI events — update note counter.
         let was_held = self.notes_held;
-        while let Some(event) = context.next_event() {
-            match event {
-                NoteEvent::NoteOn { .. } => self.notes_held += 1,
-                NoteEvent::NoteOff { .. } | NoteEvent::Choke { .. } => {
-                    self.notes_held = self.notes_held.saturating_sub(1);
-                }
-                _ => {}
-            }
-        }
+        update_notes_held(
+            &mut self.notes_held,
+            std::iter::from_fn(|| context.next_event()),
+        );
 
         // When first MIDI note pressed, start playback from preview position.
         if was_held == 0 && self.notes_held > 0 {
@@ -327,5 +322,82 @@ impl Vst3Plugin for DemucsPlugin {
         &[Vst3SubCategory::Instrument, Vst3SubCategory::Tools];
 }
 
+/// Update the MIDI note counter from a stream of note events.
+/// Extracted from `process()` for testability.
+pub(crate) fn update_notes_held(notes_held: &mut u32, events: impl Iterator<Item = NoteEvent<()>>) {
+    for event in events {
+        match event {
+            NoteEvent::NoteOn { .. } => *notes_held += 1,
+            NoteEvent::NoteOff { .. } | NoteEvent::Choke { .. } => {
+                *notes_held = notes_held.saturating_sub(1);
+            }
+            _ => {}
+        }
+    }
+}
+
 nih_export_clap!(DemucsPlugin);
 nih_export_vst3!(DemucsPlugin);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: construct a NoteOn event (timing/channel/note don't matter for counting).
+    fn note_on() -> NoteEvent<()> {
+        NoteEvent::NoteOn {
+            timing: 0,
+            voice_id: None,
+            channel: 0,
+            note: 60,
+            velocity: 0.8,
+        }
+    }
+
+    fn note_off() -> NoteEvent<()> {
+        NoteEvent::NoteOff {
+            timing: 0,
+            voice_id: None,
+            channel: 0,
+            note: 60,
+            velocity: 0.0,
+        }
+    }
+
+    fn choke() -> NoteEvent<()> {
+        NoteEvent::Choke {
+            timing: 0,
+            voice_id: None,
+            channel: 0,
+            note: 60,
+        }
+    }
+
+    #[test]
+    fn note_on_increments() {
+        let mut held = 0u32;
+        update_notes_held(&mut held, [note_on(), note_on()].into_iter());
+        assert_eq!(held, 2);
+    }
+
+    #[test]
+    fn note_off_decrements() {
+        let mut held = 0u32;
+        update_notes_held(&mut held, [note_on(), note_on(), note_off()].into_iter());
+        assert_eq!(held, 1);
+    }
+
+    #[test]
+    fn saturates_at_zero() {
+        let mut held = 0u32;
+        update_notes_held(&mut held, [note_off()].into_iter());
+        assert_eq!(held, 0, "should not underflow");
+    }
+
+    #[test]
+    fn choke_decrements() {
+        let mut held = 0u32;
+        update_notes_held(&mut held, [note_on(), choke()].into_iter());
+        assert_eq!(held, 0);
+    }
+}

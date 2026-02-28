@@ -2179,6 +2179,7 @@ dependencies = [
  "bytemuck",
  "dirs 5.0.1",
  "half",
+ "hound",
  "pollster",
  "realfft",
  "safetensors 0.5.3",

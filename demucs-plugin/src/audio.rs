@@ -178,3 +178,197 @@ fn silence_buffer(buffer: &mut Buffer) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shared_state::{StemBuffers, StemChannel};
+
+    /// Replicate the main-output mix logic from `serve_stems` on plain slices.
+    /// This avoids constructing `nih_plug::Buffer` in tests.
+    fn mix_stems_plain(
+        stems: &StemBuffers,
+        gains: &[f32],
+        solos: &[bool],
+        playback_pos: usize,
+        n_output: usize,
+        daw_sr: u32,
+    ) -> (Vec<f32>, Vec<f32>) {
+        let n_stems = stems.stems.len();
+        let n_samples = stems.n_samples;
+        let rate_ratio = stems.sample_rate as f64 / daw_sr as f64;
+
+        // Compute per-stem effective gains (mirrors serve_stems lines 45-62)
+        let any_solo = solos.iter().take(n_stems).any(|&s| s);
+        let mut main_gain = vec![0.0f32; n_stems];
+        for i in 0..n_stems {
+            let gain = gains.get(i).copied().unwrap_or(1.0);
+            main_gain[i] = gain
+                * if any_solo {
+                    if solos.get(i).copied().unwrap_or(false) {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                } else {
+                    1.0
+                };
+        }
+
+        let mut out_l = vec![0.0f32; n_output];
+        let mut out_r = vec![0.0f32; n_output];
+        let mut stem_pos_f = playback_pos as f64 * rate_ratio;
+
+        for frame_idx in 0..n_output {
+            let idx = stem_pos_f as usize;
+            let frac = (stem_pos_f - idx as f64) as f32;
+
+            let (mut l, mut r) = (0.0f32, 0.0f32);
+            if idx + 1 < n_samples {
+                for (i, &g) in main_gain.iter().enumerate() {
+                    let stem = &stems.stems[i];
+                    l += lerp(stem.left[idx], stem.left[idx + 1], frac) * g;
+                    r += lerp(stem.right[idx], stem.right[idx + 1], frac) * g;
+                }
+            } else if idx < n_samples {
+                for (i, &g) in main_gain.iter().enumerate() {
+                    l += stems.stems[i].left[idx] * g;
+                    r += stems.stems[i].right[idx] * g;
+                }
+            }
+            out_l[frame_idx] = l;
+            out_r[frame_idx] = r;
+            stem_pos_f += rate_ratio;
+        }
+
+        (out_l, out_r)
+    }
+
+    /// Make test stems with simple known values.
+    fn make_test_stems(n_samples: usize, n_stems: usize, sample_rate: u32) -> StemBuffers {
+        let stems: Vec<StemChannel> = (0..n_stems)
+            .map(|s| {
+                let val = (s + 1) as f32 * 0.1; // 0.1, 0.2, 0.3, 0.4
+                StemChannel {
+                    left: vec![val; n_samples],
+                    right: vec![val * 2.0; n_samples],
+                }
+            })
+            .collect();
+        StemBuffers {
+            stems,
+            sample_rate,
+            n_samples,
+            stem_names: (0..n_stems).map(|i| format!("stem{i}")).collect(),
+        }
+    }
+
+    #[test]
+    fn unity_gain_sum() {
+        let bufs = make_test_stems(100, 4, 44100);
+        let gains = vec![1.0; 4];
+        let solos = vec![false; 4];
+        let (l, r) = mix_stems_plain(&bufs, &gains, &solos, 0, 10, 44100);
+
+        // Sum of stem values: 0.1+0.2+0.3+0.4 = 1.0
+        for &v in &l {
+            assert!((v - 1.0).abs() < 1e-5, "left={v}, expected 1.0");
+        }
+        // Right channels: 0.2+0.4+0.6+0.8 = 2.0
+        for &v in &r {
+            assert!((v - 2.0).abs() < 1e-5, "right={v}, expected 2.0");
+        }
+    }
+
+    #[test]
+    fn solo_isolates_stem() {
+        let bufs = make_test_stems(100, 4, 44100);
+        let gains = vec![1.0; 4];
+        let solos = vec![true, false, false, false]; // solo stem 0 only
+        let (l, r) = mix_stems_plain(&bufs, &gains, &solos, 0, 10, 44100);
+
+        // Only stem 0 (val=0.1) should pass
+        for &v in &l {
+            assert!((v - 0.1).abs() < 1e-5, "left={v}, expected 0.1");
+        }
+        for &v in &r {
+            assert!((v - 0.2).abs() < 1e-5, "right={v}, expected 0.2");
+        }
+    }
+
+    #[test]
+    fn gain_scaling() {
+        let bufs = make_test_stems(100, 4, 44100);
+        let gains = vec![0.5, 1.0, 1.0, 1.0];
+        let solos = vec![false; 4];
+        let (l, _r) = mix_stems_plain(&bufs, &gains, &solos, 0, 10, 44100);
+
+        // stem0: 0.1*0.5=0.05, stem1: 0.2, stem2: 0.3, stem3: 0.4 → total = 0.95
+        for &v in &l {
+            assert!((v - 0.95).abs() < 1e-5, "left={v}, expected 0.95");
+        }
+    }
+
+    #[test]
+    fn multi_solo() {
+        let bufs = make_test_stems(100, 4, 44100);
+        let gains = vec![1.0; 4];
+        let solos = vec![true, false, true, false]; // solo stems 0 and 2
+        let (l, _r) = mix_stems_plain(&bufs, &gains, &solos, 0, 10, 44100);
+
+        // stem0: 0.1 + stem2: 0.3 = 0.4
+        for &v in &l {
+            assert!((v - 0.4).abs() < 1e-5, "left={v}, expected 0.4");
+        }
+    }
+
+    #[test]
+    fn rate_conversion() {
+        // Stems at 44100, DAW at 48000 → output should have correct count
+        let bufs = make_test_stems(44100, 1, 44100);
+        let gains = vec![1.0];
+        let solos = vec![false];
+        // Request 480 output samples at 48000 Hz ≈ 10ms
+        let (l, r) = mix_stems_plain(&bufs, &gains, &solos, 0, 480, 48000);
+        assert_eq!(l.len(), 480);
+        assert_eq!(r.len(), 480);
+        // Values should be interpolated from stem data (all 0.1)
+        for &v in &l {
+            assert!((v - 0.1).abs() < 1e-4, "left={v}, expected ~0.1");
+        }
+    }
+
+    #[test]
+    fn past_end_is_silence() {
+        let bufs = make_test_stems(100, 2, 44100);
+        let gains = vec![1.0; 2];
+        let solos = vec![false; 2];
+        // Start past the end of stems
+        let (l, r) = mix_stems_plain(&bufs, &gains, &solos, 200, 10, 44100);
+        for &v in &l {
+            assert_eq!(v, 0.0, "expected silence past end");
+        }
+        for &v in &r {
+            assert_eq!(v, 0.0, "expected silence past end");
+        }
+    }
+
+    // ── daw_duration tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn daw_duration_same_rate() {
+        assert_eq!(daw_duration(44100, 44100, 44100), 44100);
+    }
+
+    #[test]
+    fn daw_duration_different_rate() {
+        // 44100 stem samples at 44100 Hz, DAW at 48000 → 48000 DAW samples
+        assert_eq!(daw_duration(44100, 44100, 48000), 48000);
+    }
+
+    #[test]
+    fn daw_duration_zero_stem_rate() {
+        // Edge case: zero stem rate → identity
+        assert_eq!(daw_duration(1000, 0, 48000), 1000);
+    }
+}

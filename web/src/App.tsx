@@ -226,6 +226,12 @@ export default function App() {
       }
 
       stemUrlsRef.current = urls;
+
+      // Expose stem data for E2E test validation
+      if (import.meta.env.DEV || import.meta.env.VITE_E2E) {
+        (window as any).__e2e = { stems: tracks, originalLeft: left, originalRight: right };
+      }
+
       setPhase({ kind: "separated", stems, tracks });
     } catch (err) {
       console.error("Separation failed:", err);
