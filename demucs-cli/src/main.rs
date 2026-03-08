@@ -70,6 +70,19 @@ fn build_options(info: &ModelInfo, selected: &[StemId]) -> ModelOptions {
 }
 
 fn main() -> Result<()> {
+    // Windows default stack is 1 MB (vs 8 MB on macOS/Linux), which is
+    // insufficient for the deep model inference graph.  Run on a thread
+    // with an explicit 8 MB stack so every platform behaves the same.
+    std::thread::Builder::new()
+        .name("demucs-main".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(run)
+        .expect("failed to spawn main thread")
+        .join()
+        .unwrap()
+}
+
+fn run() -> Result<()> {
     let cli = Cli::parse();
 
     // 1. Resolve model info
