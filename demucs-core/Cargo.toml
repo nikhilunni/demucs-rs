@@ -2,6 +2,7 @@
 name = "demucs-core"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
 
 [features]
 default = []
@@ -27,7 +28,7 @@ realfft = "3.5.0"
 # this crate's own `fusion`/`autotune` features (see [features]); everything
 # demucs-core needs (tensor, nn, module) lives in non-optional burn sub-crates
 # that only require `std`.
-burn = { version = "0.20.1", default-features = false, features = ["std"] }
+burn = { version = "0.21", default-features = false, features = ["std"] }
 safetensors = "0.5"
 half = "2"
 
@@ -41,7 +42,7 @@ dirs = "5"
 # `burn/default` crate-wide and cannot catch breakage in the defaults-off
 # config that real consumers get — the `cargo check -p demucs-core` steps in
 # the CI lint job cover that, since `-p` excludes dev-dependencies.
-burn = { version = "0.20.1", features = ["ndarray"] }
+burn = { version = "0.21", features = ["ndarray"] }
 safetensors = "0.5"
 pollster = "0.4"
 bytemuck = "1"

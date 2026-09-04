@@ -340,7 +340,7 @@ mod tests {
         let compress = ch / 4;
         let conv1 = Conv1dConfig::new(ch, compress, 3)
             .with_dilation(dilation)
-            .with_padding(PaddingConfig1d::Explicit(dilation))
+            .with_padding(PaddingConfig1d::Explicit(dilation, dilation))
             .init(&device);
         let norm1 = GroupNormConfig::new(1, compress).init(&device);
         let conv2 = Conv1dConfig::new(compress, 2 * ch, 1).init(&device);
@@ -366,7 +366,7 @@ mod tests {
         let device = Default::default();
         let conv = Conv2dConfig::new([chin, chout], [8, 1])
             .with_stride([4, 1])
-            .with_padding(PaddingConfig2d::Explicit(2, 0))
+            .with_padding(PaddingConfig2d::Explicit(2, 0, 2, 0))
             .init(&device);
         let dconv = make_dconv(chout, 2);
         let rewrite = Conv2dConfig::new([chout, 2 * chout], [1, 1]).init(&device);
@@ -383,7 +383,7 @@ mod tests {
         let device = Default::default();
         let conv = Conv1dConfig::new(chin, chout, 8)
             .with_stride(4)
-            .with_padding(PaddingConfig1d::Explicit(2))
+            .with_padding(PaddingConfig1d::Explicit(2, 2))
             .init(&device);
         let dconv = make_dconv(chout, 2);
         let rewrite = Conv1dConfig::new(chout, 2 * chout, 1).init(&device);
@@ -399,7 +399,7 @@ mod tests {
     fn make_hdec_layer(chin: usize, chout: usize, last: bool) -> HDecLayer<B> {
         let device = Default::default();
         let rewrite = Conv2dConfig::new([chin, 2 * chin], [3, 3])
-            .with_padding(PaddingConfig2d::Explicit(1, 1))
+            .with_padding(PaddingConfig2d::Explicit(1, 1, 1, 1))
             .init(&device);
         let glu = GLU::new(1);
         let dconv = make_dconv(chin, 2);
@@ -419,7 +419,7 @@ mod tests {
     fn make_tdec_layer(chin: usize, chout: usize, last: bool) -> TDecLayer<B> {
         let device = Default::default();
         let rewrite = Conv1dConfig::new(chin, 2 * chin, 3)
-            .with_padding(PaddingConfig1d::Explicit(1))
+            .with_padding(PaddingConfig1d::Explicit(1, 1))
             .init(&device);
         let glu = GLU::new(1);
         let dconv = make_dconv(chin, 2);

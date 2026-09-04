@@ -11,7 +11,7 @@ nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["a
 
 # Core inference
 demucs-core = { path = "../demucs-core", features = ["wgpu", "autotune", "fusion"] }
-burn = { version = "0.20.1", features = ["wgpu", "autotune", "fusion"] }
+burn = { version = "0.21", features = ["wgpu", "autotune", "fusion"] }
 cubecl = { version = "0.9", default-features = false }
 
 # Audio I/O
@@ -39,7 +39,7 @@ ureq = { version = "2", default-features = false, features = ["native-tls", "gzi
 log = "0.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-burn = { version = "0.20.1", features = ["metal"] }
+burn = { version = "0.21", features = ["metal"] }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-burn = { version = "0.20.1", features = ["vulkan"] }
+burn = { version = "0.21", features = ["vulkan"] }

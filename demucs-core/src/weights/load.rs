@@ -681,7 +681,7 @@ mod tests {
         let mut store = TensorStore::from_bytes(&safetensors_bytes, "sig").unwrap();
         let device = device();
         let mut conv: Conv1d<B> = burn::nn::conv::Conv1dConfig::new(1, 2, 3)
-            .with_padding(burn::nn::PaddingConfig1d::Explicit(1))
+            .with_padding(burn::nn::PaddingConfig1d::Explicit(1, 1))
             .init(&device);
 
         load_conv1d(&mut conv, &mut store, "c", &device).unwrap();

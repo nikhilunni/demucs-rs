@@ -13,7 +13,7 @@ cpu     = ["demucs-core/ndarray", "burn/ndarray"]
 
 [dependencies]
 demucs-core = { path = "../demucs-core", features = ["wgpu", "autotune", "fusion"] }
-burn = { version = "0.20.1", features = ["wgpu", "autotune", "fusion"] }
+burn = { version = "0.21", features = ["wgpu", "autotune", "fusion"] }
 cubecl = { version = "0.9", default-features = false }
 clap = { version = "4", features = ["derive"] }
 hound = "3"
@@ -24,7 +24,7 @@ anyhow = "1"
 pollster = "0.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-burn = { version = "0.20.1", features = ["metal"] }
+burn = { version = "0.21", features = ["metal"] }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-burn = { version = "0.20.1", features = ["vulkan"] }
+burn = { version = "0.21", features = ["vulkan"] }
