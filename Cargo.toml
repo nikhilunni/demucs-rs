@@ -1,5 +1,5 @@
 [workspace]
-members = ["demucs-core", "demucs-wasm", "demucs-cli", "demucs-plugin", "xtask"]
+members = ["demucs-core", "demucs-wasm", "demucs-cli", "demucs-mcp", "demucs-plugin", "xtask"]
 resolver = "2"
 
 [profile.release]

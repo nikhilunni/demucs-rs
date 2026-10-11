@@ -1,12 +1,20 @@
 use anyhow::{bail, Context, Result};
 use demucs_core::model::metadata::ModelInfo;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::io::Read;
 
-/// Download model weights from HuggingFace, displaying a progress bar.
-pub fn fetch(info: &ModelInfo) -> Result<Vec<u8>> {
+use crate::separate::Reporter;
+
+/// Download model weights from HuggingFace.
+///
+/// A terminal progress bar is drawn only when the reporter asks for one; in
+/// MCP mode stderr/stdout stay quiet and progress goes through the reporter.
+pub fn fetch(info: &ModelInfo, reporter: &dyn Reporter) -> Result<Vec<u8>> {
     let url = demucs_core::model::metadata::download_url(info);
-    eprintln!("Downloading {} ({} MB) ...", info.id, info.size_mb);
+    reporter.status(&format!(
+        "Downloading {} ({} MB) ...",
+        info.id, info.size_mb
+    ));
 
     let tls =
         std::sync::Arc::new(ureq::native_tls::TlsConnector::new().context("Failed to init TLS")?);
@@ -26,7 +34,11 @@ pub fn fetch(info: &ModelInfo) -> Result<Vec<u8>> {
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(info.size_mb as u64 * 1_000_000);
 
-    let pb = ProgressBar::new(total_bytes);
+    let pb = if reporter.show_download_bar() {
+        ProgressBar::new(total_bytes)
+    } else {
+        ProgressBar::with_draw_target(Some(total_bytes), ProgressDrawTarget::hidden())
+    };
     pb.set_style(
         ProgressStyle::with_template(
             "{spinner:.green} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})",
@@ -36,9 +48,17 @@ pub fn fetch(info: &ModelInfo) -> Result<Vec<u8>> {
     );
 
     let mut data = Vec::with_capacity(total_bytes as usize);
-    pb.wrap_read(response.into_reader())
-        .read_to_end(&mut data)
-        .context("Failed to read model data")?;
+    let mut reader = response.into_reader();
+    let mut buf = vec![0u8; 256 * 1024];
+    loop {
+        let n = reader.read(&mut buf).context("Failed to read model data")?;
+        if n == 0 {
+            break;
+        }
+        data.extend_from_slice(&buf[..n]);
+        pb.inc(n as u64);
+        reporter.download_progress(data.len() as u64, total_bytes);
+    }
     pb.finish_with_message("done");
 
     Ok(data)

@@ -2164,9 +2164,11 @@ dependencies = [
  "clap",
  "cubecl",
  "demucs-core",
+ "demucs-mcp",
  "hound",
  "indicatif",
  "pollster",
+ "serde_json",
  "symphonia",
  "ureq",
 ]
@@ -2183,6 +2185,15 @@ dependencies = [
  "pollster",
  "realfft",
  "safetensors 0.5.3",
+]
+
+[[package]]
+name = "demucs-mcp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

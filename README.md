@@ -100,10 +100,10 @@ Model weights are downloaded automatically from Hugging Face on first use (both 
 ```
 Separate audio stems from a music file
 
-Usage: demucs [OPTIONS] <INPUT>
+Usage: demucs [OPTIONS] [INPUT]
 
 Arguments:
-  <INPUT>  Input audio file (WAV, AIFF, FLAC, MP3, OGG, M4A/AAC — stereo or mono, any sample rate)
+  [INPUT]  Input audio file (WAV, AIFF, FLAC, MP3, OGG, M4A/AAC — stereo or mono, any sample rate)
 
 Options:
   -m, --model <MODEL>    Model variant [default: htdemucs]
@@ -113,6 +113,7 @@ Options:
                          Default: all stems for the chosen model
   -o, --output <OUTPUT>  Output directory [default: ./stems/]
       --debug            Print layer-by-layer debug stats
+      --mcp              Run as an MCP server over stdio
   -h, --help             Print help
 ```
 
@@ -131,6 +132,35 @@ demucs song.flac -m htdemucs_6s -o ./my_stems/
 # Best quality with the fine-tuned model
 demucs song.wav -m htdemucs_ft
 ```
+
+## Use as an MCP server
+
+`demucs --mcp` speaks [MCP](https://modelcontextprotocol.io) over stdio
+(newline-delimited JSON-RPC 2.0), so any MCP client can separate stems without
+shelling out. stdout carries JSON-RPC only; logs go to stderr.
+
+Generic client config:
+
+```json
+{
+  "mcpServers": {
+    "demucs": { "command": "demucs", "args": ["--mcp"] }
+  }
+}
+```
+
+Tools:
+
+- `separate_stems` — `{ input, model?, stems?, output_dir? }`. `input` and `output_dir`
+  must be absolute paths; `output_dir` defaults to `<input name>_stems/` beside the input.
+  Returns a text summary plus `structuredContent` with the written stem paths.
+  Failures come back as `isError: true`. Send `_meta.progressToken` to receive
+  `notifications/progress`, and `notifications/cancelled` to stop a run between chunks.
+- `list_models` — model metadata plus a `cached` flag, so a client can warn before
+  weights are downloaded.
+
+One separation runs at a time; a second concurrent call returns a "busy" error.
+The last loaded model is kept in memory, so repeated calls skip weight loading and GPU init.
 
 ## Development Setup
 
