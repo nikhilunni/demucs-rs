@@ -44,23 +44,29 @@ impl TensorStore {
                 Dtype::F32 => {
                     // Interpret raw bytes as f32 directly
                     raw_bytes
-                        .chunks_exact(4)
-                        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|c| f32::from_le_bytes(*c))
                         .collect()
                 }
                 Dtype::F16 => {
                     // Convert F16 → f32
                     raw_bytes
-                        .chunks_exact(2)
-                        .map(|c| f16::from_le_bytes([c[0], c[1]]).to_f32())
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|c| f16::from_le_bytes(*c).to_f32())
                         .collect()
                 }
                 Dtype::BF16 => {
                     // Convert BF16 → f32
                     raw_bytes
-                        .chunks_exact(2)
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
                         .map(|c| {
-                            let bits = u16::from_le_bytes([c[0], c[1]]);
+                            let bits = u16::from_le_bytes(*c);
                             f32::from_bits((bits as u32) << 16)
                         })
                         .collect()
