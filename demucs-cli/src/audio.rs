@@ -103,7 +103,7 @@ pub fn read_audio(path: &Path) -> Result<(Vec<f32>, Vec<f32>, u32)> {
                 right.push(s);
             }
         } else {
-            for frame in samples.chunks_exact(2) {
+            for frame in samples.as_chunks::<2>().0 {
                 left.push(frame[0]);
                 right.push(frame[1]);
             }
