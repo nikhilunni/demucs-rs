@@ -96,10 +96,35 @@ pub enum ForwardEvent {
     ChunkDone { index: usize, total: usize },
 }
 
+/// One stem's samples in a [`FinishedAudio`].
+#[derive(Debug, Clone, Copy)]
+pub struct StemSlice<'a> {
+    pub id: crate::model::metadata::StemId,
+    pub left: &'a [f32],
+    pub right: &'a [f32],
+}
+
+/// Separated audio that is final: overlap-added and normalised, so no later
+/// chunk changes it. Each frame is reported once, in order, so a listener
+/// can play or draw the stems while the rest is still being worked out.
+#[derive(Debug, Clone, Copy)]
+pub struct FinishedAudio<'a> {
+    /// The frame the slices start at; every frame before it was reported.
+    pub from: usize,
+    /// The rate of these samples: always the network's (44.1 kHz), whatever
+    /// the input's. The stems a separation returns are at the input's rate.
+    pub sample_rate: u32,
+    /// Each stem being given, as long as each other.
+    pub stems: &'a [StemSlice<'a>],
+}
+
 /// Trait for observing the forward pass. Implement this for UI, debugging, etc.
 pub trait ForwardListener {
     /// Called at each checkpoint. The event describes what just happened.
     fn on_event(&mut self, event: ForwardEvent);
+
+    /// Called when more of the stems is final, after each chunk.
+    fn on_finished(&mut self, _audio: &FinishedAudio<'_>) {}
 
     /// Return `true` to receive `TensorStats` in events. Computing stats has
     /// a cost (tensor reduction ops), so return `false` for pure progress UI.
@@ -107,7 +132,9 @@ pub trait ForwardListener {
         false
     }
 
-    /// Return `true` to cancel the current operation. Checked between chunks.
+    /// Return `true` to cancel the current operation. Checked between
+    /// chunks, between the networks of a fine-tuned model, and between the
+    /// layers of a network.
     fn is_cancelled(&self) -> bool {
         false
     }

@@ -198,6 +198,10 @@ impl<B: Backend> HTDemucs<B> {
             });
         }
 
+        if listener.is_cancelled() {
+            return Err(DemucsError::Cancelled);
+        }
+
         // 3. Encode time
         let mut time_skips: Vec<Tensor<B, 3>> = Vec::new();
         let mut time_lengths: Vec<usize> = Vec::new(); // input lengths for decoder trimming
@@ -214,6 +218,10 @@ impl<B: Backend> HTDemucs<B> {
             });
         }
 
+        if listener.is_cancelled() {
+            return Err(DemucsError::Cancelled);
+        }
+
         // 4. Bottleneck cross-domain transformer
         let (mut freq, mut time) = self.crosstransformer.forward(freq, time)?;
 
@@ -227,6 +235,10 @@ impl<B: Backend> HTDemucs<B> {
             freq_stats: maybe_stats(&freq, listener),
             time_stats: maybe_stats(&time, listener),
         });
+
+        if listener.is_cancelled() {
+            return Err(DemucsError::Cancelled);
+        }
 
         // 5. Decode freq (reverse order, with skips)
         let freq_dims: Vec<usize> = freq_skips.iter().map(|s| s.dims()[2]).collect();
@@ -247,6 +259,10 @@ impl<B: Backend> HTDemucs<B> {
                 num_layers: depth,
                 stats: maybe_stats(&freq, listener),
             });
+        }
+
+        if listener.is_cancelled() {
+            return Err(DemucsError::Cancelled);
         }
 
         // 6. Decode time (reverse order, with skips)

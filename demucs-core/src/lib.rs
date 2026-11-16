@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use crate::dsp::cac::{cac_data_to_complex, stft_to_cac};
 use crate::dsp::resample::resample_channel;
 use crate::dsp::stft::Stft;
-use crate::listener::{ForwardEvent, ForwardListener, NoOpListener};
+use crate::listener::{FinishedAudio, ForwardEvent, ForwardListener, NoOpListener, StemSlice};
 use crate::model::{
     htdemucs::HTDemucs,
     metadata::{ModelInfo, StemId, HTDEMUCS, HTDEMUCS_6S, HTDEMUCS_FT},
@@ -42,13 +42,31 @@ impl<B: Backend> Demucs<B> {
     /// Uses a synthetic sine wave (not zeros) so autotune sees representative
     /// value distributions and selects the same kernel variants as real audio.
     pub async fn warmup(&self) {
+        let _ = self
+            .warmup_networks(self.opts.selected(), &mut NoOpListener)
+            .await;
+    }
+
+    /// Like [`Demucs::warmup`], but for every network the model holds,
+    /// telling `listener` how far it has got and stopping early, with
+    /// [`DemucsError::Cancelled`], once it says so.
+    pub async fn warmup_with_listener(&self, listener: &mut impl ForwardListener) -> Result<()> {
+        self.warmup_networks(self.opts.model_info().stems, listener)
+            .await
+    }
+
+    async fn warmup_networks(
+        &self,
+        run: &[StemId],
+        listener: &mut impl ForwardListener,
+    ) -> Result<()> {
         let dummy: Vec<f32> = (0..TRAINING_LENGTH)
             .map(|i| (i as f32 * 0.1).sin() * 0.5)
             .collect();
         let info = self.opts.model_info();
-        let _ = self
-            .separate_single_segment(&dummy, &dummy, TRAINING_LENGTH, info, &mut NoOpListener)
-            .await;
+        self.separate_single_segment(&dummy, &dummy, TRAINING_LENGTH, info, run, listener)
+            .await
+            .map(|_| ())
     }
 
     pub async fn separate(
@@ -66,6 +84,81 @@ impl<B: Backend> Demucs<B> {
         left_channel: &[f32],
         right_channel: &[f32],
         sample_rate: u32,
+        listener: &mut impl ForwardListener,
+    ) -> Result<Vec<Stem>> {
+        let info = self.opts.model_info();
+        let run = self.opts.selected().to_vec();
+        // As it always has: for long audio a fine-tuned model gives every
+        // stem it knows, silent where none was asked for; for short audio
+        // only those asked for.
+        let n_samples = match sample_rate == SAMPLE_RATE as u32 {
+            true => left_channel.len(),
+            false => resampled_len(left_channel.len(), sample_rate),
+        };
+        let keep = match (&self.opts, n_samples > TRAINING_LENGTH) {
+            (ModelOptions::FineTuned(_), false) => run.clone(),
+            _ => info.stems.to_vec(),
+        };
+        self.separate_inner(
+            left_channel,
+            right_channel,
+            sample_rate,
+            &run,
+            &keep,
+            listener,
+        )
+        .await
+    }
+
+    /// Like [`Demucs::separate_with_listener`], but gives only `stems`, in
+    /// the order the model lists them. A fine-tuned model runs only the
+    /// networks of the stems asked for, whatever it was built with, so one
+    /// loaded model serves any choice of stems, call by call.
+    pub async fn separate_stems_with_listener(
+        &self,
+        left_channel: &[f32],
+        right_channel: &[f32],
+        sample_rate: u32,
+        stems: &[StemId],
+        listener: &mut impl ForwardListener,
+    ) -> Result<Vec<Stem>> {
+        let info = self.opts.model_info();
+        if let Some(missing) = stems.iter().find(|stem| !info.stems.contains(stem)) {
+            return Err(DemucsError::Internal(format!(
+                "the {} model has no {} stem",
+                info.id,
+                missing.as_str()
+            )));
+        }
+        let keep: Vec<StemId> = info
+            .stems
+            .iter()
+            .copied()
+            .filter(|stem| stems.contains(stem))
+            .collect();
+        let run = match self.opts {
+            ModelOptions::FineTuned(_) => keep.clone(),
+            _ => info.stems.to_vec(),
+        };
+        self.separate_inner(
+            left_channel,
+            right_channel,
+            sample_rate,
+            &run,
+            &keep,
+            listener,
+        )
+        .await
+    }
+
+    /// Runs the networks of the stems in `run` and gives the stems in `keep`.
+    async fn separate_inner(
+        &self,
+        left_channel: &[f32],
+        right_channel: &[f32],
+        sample_rate: u32,
+        run: &[StemId],
+        keep: &[StemId],
         listener: &mut impl ForwardListener,
     ) -> Result<Vec<Stem>> {
         let info = self.opts.model_info();
@@ -87,19 +180,40 @@ impl<B: Backend> Demucs<B> {
 
         // ── 1. Short audio fast path (≤ TRAINING_LENGTH) ────────────────────
         let mut stems = if n_samples <= TRAINING_LENGTH {
-            self.separate_single_segment(left_channel, right_channel, n_samples, info, listener)
-                .await?
+            let stems = self
+                .separate_single_segment(
+                    left_channel,
+                    right_channel,
+                    n_samples,
+                    info,
+                    run,
+                    listener,
+                )
+                .await?;
+            let stems: Vec<Stem> = stems
+                .into_iter()
+                .filter(|stem| keep.contains(&stem.id))
+                .collect();
+            let slices: Vec<StemSlice<'_>> = stems
+                .iter()
+                .map(|stem| StemSlice {
+                    id: stem.id,
+                    left: &stem.left,
+                    right: &stem.right,
+                })
+                .collect();
+            listener.on_finished(&FinishedAudio {
+                from: 0,
+                sample_rate: SAMPLE_RATE as u32,
+                stems: &slices,
+            });
+            stems
         } else {
             // ── 2. Chunked inference for long audio ─────────────────────────
             let segment = TRAINING_LENGTH;
             let stride = segment * 3 / 4; // 75% of segment = 25% overlap
-            let num_chunks = n_samples.saturating_sub(segment).div_ceil(stride) + 1;
-            let n_stems = info.stems.len();
-
-            // Accumulators: per-stem left/right + weight
-            let mut out_left = vec![vec![0.0f32; n_samples]; n_stems];
-            let mut out_right = vec![vec![0.0f32; n_samples]; n_stems];
-            let mut sum_weight = vec![0.0f32; n_samples];
+            let num_chunks = num_chunks(n_samples);
+            let mut overlap = OverlapAdd::new(keep, n_samples);
 
             for chunk_idx in 0..num_chunks {
                 listener.on_event(ForwardEvent::ChunkStarted {
@@ -115,22 +229,28 @@ impl<B: Backend> Demucs<B> {
                 let right_chunk = &right_channel[start..end];
 
                 let chunk_stems = self
-                    .separate_single_segment(left_chunk, right_chunk, chunk_len, info, listener)
+                    .separate_single_segment(
+                        left_chunk,
+                        right_chunk,
+                        chunk_len,
+                        info,
+                        run,
+                        listener,
+                    )
                     .await?;
+                overlap.add(start, &chunk_stems);
 
-                // Apply triangular window and accumulate
-                let window = triangular_window(chunk_len);
-                for stem in chunk_stems.iter() {
-                    let s = info.stems.iter().position(|&id| id == stem.id).unwrap();
-                    for i in 0..chunk_len {
-                        let w = window[i];
-                        out_left[s][start + i] += w * stem.left[i];
-                        out_right[s][start + i] += w * stem.right[i];
-                    }
-                }
-                for i in 0..chunk_len {
-                    sum_weight[start + i] += window[i];
-                }
+                // No later chunk reaches back before where the next one starts.
+                let finished = match chunk_idx + 1 == num_chunks {
+                    true => n_samples,
+                    false => (start + stride).min(n_samples),
+                };
+                let from = overlap.finish(finished);
+                listener.on_finished(&FinishedAudio {
+                    from,
+                    sample_rate: SAMPLE_RATE as u32,
+                    stems: &overlap.slices(from, finished),
+                });
 
                 listener.on_event(ForwardEvent::ChunkDone {
                     index: chunk_idx,
@@ -141,24 +261,7 @@ impl<B: Backend> Demucs<B> {
                     return Err(DemucsError::Cancelled);
                 }
             }
-
-            // Normalize by accumulated weight
-            let mut stems = Vec::with_capacity(n_stems);
-            for (s, &stem_id) in info.stems.iter().enumerate() {
-                for i in 0..n_samples {
-                    let w = sum_weight[i];
-                    if w > 0.0 {
-                        out_left[s][i] /= w;
-                        out_right[s][i] /= w;
-                    }
-                }
-                stems.push(Stem {
-                    id: stem_id,
-                    left: std::mem::take(&mut out_left[s]),
-                    right: std::mem::take(&mut out_right[s]),
-                });
-            }
-            stems
+            overlap.into_stems()
         };
 
         // ── 3. Resample outputs back to original rate if needed ──────────────
@@ -181,6 +284,7 @@ impl<B: Backend> Demucs<B> {
         right_channel: &[f32],
         n_samples: usize,
         info: &'static ModelInfo,
+        run: &[StemId],
         listener: &mut impl ForwardListener,
     ) -> Result<Vec<Stem>> {
         let device = &self.device;
@@ -225,11 +329,14 @@ impl<B: Backend> Demucs<B> {
                 }
                 stems
             }
-            ModelOptions::FineTuned(selected) => {
+            ModelOptions::FineTuned(_) => {
                 let mut stems = Vec::new();
                 for (i, &stem_id) in info.stems.iter().enumerate() {
-                    if !selected.contains(&stem_id) {
+                    if !run.contains(&stem_id) {
                         continue;
+                    }
+                    if listener.is_cancelled() {
+                        return Err(DemucsError::Cancelled);
                     }
                     let (freq_out, time_out) = self.models[i].forward_with_listener(
                         freq.clone(),
@@ -262,6 +369,14 @@ pub enum ModelOptions {
 }
 
 impl ModelOptions {
+    /// The stems whose networks this model runs when not told otherwise.
+    fn selected(&self) -> &[StemId] {
+        match self {
+            ModelOptions::FineTuned(selected) => selected,
+            _ => self.model_info().stems,
+        }
+    }
+
     pub fn model_info(&self) -> &'static ModelInfo {
         match self {
             ModelOptions::FourStem => &HTDEMUCS,
@@ -470,6 +585,92 @@ async fn extract_single_stem<B: Backend>(
     })
 }
 
+/// The stems of a long input put together from the chunks it is cut into,
+/// each weighted by a triangular window, as the chunks arrive in order.
+struct OverlapAdd {
+    ids: Vec<StemId>,
+    left: Vec<Vec<f32>>,
+    right: Vec<Vec<f32>>,
+    weight: Vec<f32>,
+    /// Frames before this are final: divided by their whole weight.
+    finished: usize,
+}
+
+impl OverlapAdd {
+    fn new(ids: &[StemId], frames: usize) -> Self {
+        Self {
+            ids: ids.to_vec(),
+            left: vec![vec![0.0; frames]; ids.len()],
+            right: vec![vec![0.0; frames]; ids.len()],
+            weight: vec![0.0; frames],
+            finished: 0,
+        }
+    }
+
+    /// Adds a chunk's stems, the chunk starting at frame `start`. Stems not
+    /// kept are passed over.
+    fn add(&mut self, start: usize, stems: &[Stem]) {
+        let len = stems.first().map_or(0, |stem| stem.left.len());
+        let window = triangular_window(len);
+        for stem in stems {
+            let Some(s) = self.ids.iter().position(|&id| id == stem.id) else {
+                continue;
+            };
+            let left = &mut self.left[s][start..start + len];
+            let right = &mut self.right[s][start..start + len];
+            for (i, &w) in window.iter().enumerate() {
+                left[i] += w * stem.left[i];
+                right[i] += w * stem.right[i];
+            }
+        }
+        for (sum, &w) in self.weight[start..start + len].iter_mut().zip(&window) {
+            *sum += w;
+        }
+    }
+
+    /// Divides the frames up to `end` by their weight, which no later chunk
+    /// adds to. Returns where the frames this call finished start.
+    fn finish(&mut self, end: usize) -> usize {
+        let from = self.finished;
+        for s in 0..self.ids.len() {
+            for i in from..end {
+                let w = self.weight[i];
+                if w > 0.0 {
+                    self.left[s][i] /= w;
+                    self.right[s][i] /= w;
+                }
+            }
+        }
+        self.finished = end.max(from);
+        from
+    }
+
+    fn slices(&self, from: usize, to: usize) -> Vec<StemSlice<'_>> {
+        self.ids
+            .iter()
+            .enumerate()
+            .map(|(s, &id)| StemSlice {
+                id,
+                left: &self.left[s][from..to],
+                right: &self.right[s][from..to],
+            })
+            .collect()
+    }
+
+    fn into_stems(self) -> Vec<Stem> {
+        self.ids
+            .into_iter()
+            .zip(self.left.into_iter().zip(self.right))
+            .map(|(id, (left, right))| Stem { id, left, right })
+            .collect()
+    }
+}
+
+/// How many frames `resample_channel` makes of `frames` at `rate`.
+fn resampled_len(frames: usize, rate: u32) -> usize {
+    (frames as f64 * SAMPLE_RATE as f64 / f64::from(rate.max(1))).ceil() as usize
+}
+
 /// Compute the number of chunks needed for a given sample count.
 pub fn num_chunks(n_samples: usize) -> usize {
     if n_samples <= TRAINING_LENGTH {
@@ -501,3 +702,91 @@ pub(crate) const SAMPLE_RATE: usize = 44100;
 /// segment = 39/5 seconds → int(39/5 * 44100) = 343980. The model always pads
 /// its input to this length during inference (via `use_train_segment`).
 pub const TRAINING_LENGTH: usize = 343980;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stem(id: StemId, len: usize, seed: f32) -> Stem {
+        let wave = |phase: f32| {
+            (0..len)
+                .map(|i| (i as f32 * 0.013 + seed + phase).sin())
+                .collect()
+        };
+        Stem {
+            id,
+            left: wave(0.0),
+            right: wave(1.0),
+        }
+    }
+
+    #[test]
+    fn audio_finished_chunk_by_chunk_is_what_the_whole_gives() {
+        let (segment, frames) = (400usize, 1500usize);
+        let stride = segment * 3 / 4;
+        let ids = [StemId::Drums, StemId::Vocals];
+        let count = frames.saturating_sub(segment).div_ceil(stride) + 1;
+        let chunks: Vec<(usize, Vec<Stem>)> = (0..count)
+            .map(|k| {
+                let start = k * stride;
+                let len = segment.min(frames - start);
+                let seed = start as f32;
+                let stems = vec![
+                    stem(StemId::Drums, len, seed),
+                    stem(StemId::Bass, len, seed + 2.0),
+                    stem(StemId::Vocals, len, seed + 4.0),
+                ];
+                (start, stems)
+            })
+            .collect();
+
+        // All at once, as before.
+        let mut whole = OverlapAdd::new(&ids, frames);
+        for (start, stems) in &chunks {
+            whole.add(*start, stems);
+        }
+        whole.finish(frames);
+        let expected = whole.into_stems();
+
+        let mut out = OverlapAdd::new(&ids, frames);
+        let mut heard: Vec<Vec<f32>> = vec![Vec::new(); ids.len()];
+        for (k, (start, stems)) in chunks.iter().enumerate() {
+            out.add(*start, stems);
+            let end = if k + 1 == chunks.len() {
+                frames
+            } else {
+                start + stride
+            };
+            let from = out.finish(end);
+            assert_eq!(from, heard[0].len(), "each frame is told once, in order");
+            for (s, slice) in out.slices(from, end).iter().enumerate() {
+                assert_eq!(slice.id, ids[s]);
+                heard[s].extend_from_slice(slice.left);
+            }
+        }
+        let got = out.into_stems();
+        assert_eq!(got.len(), 2, "only the stems kept");
+        for (s, stem) in got.iter().enumerate() {
+            assert_eq!(stem.id, ids[s]);
+            assert_eq!(stem.left, expected[s].left, "the whole is unchanged");
+            assert_eq!(stem.right, expected[s].right);
+            assert_eq!(
+                heard[s], expected[s].left,
+                "what was told is the final audio"
+            );
+        }
+    }
+
+    #[test]
+    fn the_resampled_length_is_the_resamplers() {
+        for (frames, rate) in [
+            (1000, 48_000),
+            (48_000, 48_000),
+            (12_345, 22_050),
+            (7, 96_000),
+        ] {
+            let made = resample_channel(&vec![0.0; frames], rate, SAMPLE_RATE as u32).unwrap();
+            assert_eq!(resampled_len(frames, rate), made.len());
+        }
+    }
+}
